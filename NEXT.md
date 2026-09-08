@@ -100,8 +100,21 @@ the real Diablo userland.
 works, on the real kernel. That is currently the case.
 
 It cannot answer: real timings (QEMU's TCG models no pipeline or cache), WiFi,
-the RTC, flash wear, or the display. The emulated machine has no working
-network either — its USB controller does not come up.
+the RTC, or flash wear. The emulated machine has no working network — its USB
+controller does not come up.
+
+### The desktop, if you want it
+
+```sh
+tools/emulator-gui-build.sh    # eight fixes, all documented in BUILDLOG §11
+tools/emulator-gui.sh          # boots to the Hildon home screen, over VNC
+```
+
+Not needed for any of the TLS work, which is why `emulator-smoke.sh` boots
+straight to a test script instead. It is useful for one thing: **rehearsing
+the first tablet session**. Installing `rootsh` and `openssh` through the real
+Application Manager, before the battery arrives, so that first charged hour is
+spent testing rather than discovering.
 
 ---
 

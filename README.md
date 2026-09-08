@@ -20,9 +20,9 @@ generates keys, and completes a TLS 1.3 handshake to example.org with
 client into a verified TLS 1.3 connection, which is modern TLS for stock
 applications that will never be rebuilt.
 Both run on the **real Diablo firmware** — Nokia's final N810 release, its
-actual 2.6.21 kernel and 220 MB userland — under full-system QEMU. Nothing has
-yet run on physical hardware; the tablet's battery is swollen and is being
-replaced.**
+actual 2.6.21 kernel and 220 MB userland — under full-system QEMU, which also
+boots all the way to the **Hildon desktop** over VNC. Nothing has yet run on
+physical hardware; the tablet's battery is swollen and is being replaced.**
 
 ## What works today
 
@@ -38,6 +38,8 @@ tools/qemu-smoke.sh          # actually run it, on the device's own glibc 2.5
 tools/qemu-stunnel-test.sh   # plain HTTP in, verified TLS 1.3 out
 tools/mk-diablo-emulator.sh  # fetch and unpack Nokia's real N810 firmware
 tools/emulator-smoke.sh      # boot it: real 2.6.21 kernel, real userland
+tools/emulator-gui-build.sh  # build an image that reaches the desktop
+tools/emulator-gui.sh        # boot that, over VNC -- a usable N810
 tools/device-smoke-test.sh   # run this ON the tablet
 tools/build-in-docker.sh     # all of the above, on any host with Docker
 ```
