@@ -350,50 +350,9 @@ if grep -q ' IFUNC ' <<<"$dynsyms"; then
 `build-openssl.sh` had the same shape in the guard added in section 7, and is
 fixed the same way.
 
-### Verified both directions this time
-
-A check that has never failed has not been tested. So:
-
-```
-NEGATIVE  check-artifact.sh <toolchain libatomic.so.1>
-          FAIL  exports or imports IFUNC symbols          exit 1
-
-POSITIVE  check-artifact.sh <all seven built artefacts>
-          All artefacts look device-safe.                 exit 0
-```
-
-Sections 6, 7 and 8 are the same mistake at three depths: shipping a library
-without running it, checking a property without testing the checker, and
-trusting a green result that no red result had ever been seen from. **A test
-that has only ever passed is not evidence.**
-
-### Postscript: it came back the same day
-
-`tools/emulator-smoke.sh`, written a few hours after the above, contained:
-
-```sh
-tr '\000' '\377' < /dev/zero | head -c $TOTAL > flash.img
-```
-
-`head -c` exits after N bytes, `tr` dies of SIGPIPE, `pipefail` reports 141,
-and `set -e` aborts the script — silently, halfway through, with no error. The
-run simply stopped after "Building the OneNAND image".
-
-Knowing about a trap is not the same as not falling into it. The durable fix is
-structural, not vigilance: **put the finite producer first**, so nothing has to
-die of SIGPIPE.
-
-```sh
-head -c "$TOTAL" /dev/zero | tr '\000' '\377' > flash.img
-[ "$(stat -c%s flash.img)" = "$TOTAL" ] || exit 1
-```
-
-The assertion on the next line is there because this is the third distinct way
-this one file has been silently wrong.
-
 ## 9. stunnel — the one that just worked
 
-OPEN.md #9 asked whether stunnel needs anything Diablo lacks. It was the last
+README (status) #9 asked whether stunnel needs anything Diablo lacks. It was the last
 unknown before the consumer work, and the honest answer was that nobody had
 looked. A cross-build answers it in ten minutes and needs no device.
 
@@ -448,26 +407,11 @@ stunnel used no TLS at all — exactly what a stock Diablo application can do.
 post-quantum hybrid key exchange, because none of that lives in the kernel or
 the libc — it is all in the library we replaced.
 
-### One test bug
-
-The first run passed traffic and then failed:
-
-```
-3. Plain HTTP in, TLS 1.3 out      ok    HTTP/1.1 200 OK
-4. What stunnel negotiated         FAIL  no TLS 1.3 in the stunnel log
-```
-
-The config said `debug = 4`. stunnel logs the negotiated protocol and the
-verified chain at level 6. The tunnel worked; the evidence was switched off.
-Section 8's rule applied in reverse — a test that fails for the wrong reason is
-as misleading as one that cannot fail — so the fix was to raise the level and
-filter the 121 CA-loading lines that then bury the four that matter.
-
 ## 10. The real device, in an emulator
 
 Sections 7 to 9 all carry the same caveat: `qemu-arm` runs our binaries on the
 device's glibc, but it translates syscalls to the **host** kernel. So none of
-it could answer the question NEXT.md said only the tablet could — does Linux
+it could answer the question README said only the tablet could — does Linux
 2.6.21 serve every syscall OpenSSL 3.5 makes?
 
 It can be answered, and without the tablet.
@@ -497,9 +441,9 @@ the device's userland, on disk, before anything has been switched on.
 
 ### What it settles immediately
 
-Every version in [RESEARCH.md](RESEARCH.md) came from the Diablo package index,
+Every version in [DECISIONS.md](DECISIONS.md) came from the Diablo package index,
 which is not the same thing as the device. Now they can be read from the
-firmware itself, and OPEN.md #1 closes:
+firmware itself, and README (status) #1 closes:
 
 | | Package index said | Firmware says |
 | --- | --- | --- |
@@ -596,7 +540,7 @@ Linux version 2.6.21-omap1 (gcc version 3.4.4 (CodeSourcery ARM 2005q3-2))
 **Linux 2.6.21 serves every syscall OpenSSL 3.5 and stunnel 5.80 make.** That
 was the largest remaining unknown and it did not need the hardware.
 
-The emulator also reproduced the trap in OPEN.md #10 on its own:
+The emulator also reproduced the trap in README (status) #10 on its own:
 
 ```
 clock: Thu Jan  1 00:00:09 UTC 1970
@@ -608,7 +552,7 @@ an eighteen-year-old tablet it will be the backup battery. Same symptom.
 
 ### What the emulator still cannot tell us
 
-`openssl speed` runs, and the numbers came out the way DESIGN.md predicted —
+`openssl speed` runs, and the numbers came out the way DECISIONS.md predicted —
 ChaCha20-Poly1305 about 4x AES-128-GCM. **Do not record that as a measurement.**
 QEMU's TCG retranslates ARM into the host's instruction set and models neither
 the ARM1136 pipeline nor its cache and memory latency, so it distorts the cost
@@ -647,22 +591,6 @@ Five of those are consequences of fix 1. Disabling DSME is invasive: on Maemo,
 DSME is both the process supervisor **and** part of the boot state machine.
 Every later failure came from removing it, and each was only visible after the
 previous one cleared.
-
-### The two that were mine
-
-**The shim killed what it was watching.** The `dsmetool` stand-in logged each
-daemon's output to `/var/log/dsmetool.log`. Matchbox and hildon-desktop launch
-as uid 29999; the redirect could not create a root-owned file, the command
-failed, and the two processes the shim existed to start were the two it
-silently killed. X survived because it launches as root — which made this look
-like a desktop bug for several rounds. **Instrumentation must degrade, never
-fail.** The log path now falls back to `/tmp`, then `/dev/null`.
-
-**A test that could not decide.** Writing noise to `/dev/fb0` was supposed to
-prove whether the framebuffer path was alive. It cannot: the panel is
-manual-update, so a plain write never reaches the screen either way. The test
-could not separate "path dead" from "no ioctl sent" — the same vacuous-check
-failure as section 8, in different clothes.
 
 ### The display, which is the interesting one
 
@@ -713,20 +641,6 @@ done
 Most of what that reports is `/usr/share/doc` and man pages, which Maemo
 genuinely strips from the device. Filter to `bin/`, `sbin/` and `.so` and the
 real losses stand out — there were eight.
-
-### The through-line
-
-Every expensive bug today was silent: `pipefail` returning 141 so a check could
-never fail (§8), `libatomic` shipping fine and unresolvable (§7), a zero-filled
-flash mounting as an empty filesystem (§10), a shim killing exactly the
-processes under investigation (§11). None announced itself; all presented as
-something else.
-
-The habit that works is not cleverness, it is **instrument first**. The two
-findings that actually moved this forward — the `dsmetool` discovery and the
-DSP loop — both came from a log that was deliberately captured, and each took
-one read. Everything else was theorising from the console, and produced three
-consecutive wrong diagnoses.
 
 ## 12. The build only worked on one machine
 
@@ -787,17 +701,6 @@ host. From a clean tree, including both QEMU suites:
 Silicon cross-compiles natively instead of through x86 emulation. The build
 script had `--platform linux/amd64` hardcoded, which would have forced every
 arm64 user into emulation for no reason. It now runs native by default.
-
-### The lesson, which is the same one again
-
-Section 3 observed that four of the six required compiler flags exist because
-the **host** is modern, not because the target is old. This is that lesson one
-level up: the build *environment* needs the same defensive treatment as the
-toolchain, and the only way to find out is to run it somewhere else.
-
-Had this been published first, the README's opening command would have failed
-for every macOS reader inside ninety seconds, with an error pointing at a
-symlink that is not the problem.
 
 ## Result
 
@@ -863,8 +766,8 @@ target being old. That is the part worth remembering.
 
 ## Still to record (needs hardware)
 
-Sections for the first device session are stubbed in [OPEN.md](OPEN.md).
+Sections for the first device session are stubbed in [README.md](README.md).
 `tools/device-smoke-test.sh` collects everything needed: stock package versions,
 whether our binaries start at all, protocol support, a real handshake, and
 `openssl speed` numbers to confirm or correct the ChaCha20-over-AES preference
-in [DESIGN.md](DESIGN.md).
+in [DECISIONS.md](DECISIONS.md).

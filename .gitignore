@@ -1,7 +1,6 @@
-# Build products and downloads. All of it is reproducible with
-# tools/build-in-docker.sh, and none of it belongs in git.
 build/
 out/
 dist/
 sysroot-diablo/
+emulator/
 .deb-cache/

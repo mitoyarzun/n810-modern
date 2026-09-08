@@ -1,7 +1,58 @@
 # Decisions
 
+Why this is built the way it is.
+
+The full record of what went wrong getting here is in [BUILDLOG.md](BUILDLOG.md).
+The traps worth knowing before you debug anything are in [CAVEATS.md](CAVEATS.md).
+
+## What the device ships
+
+From `dists/diablo/sdk/free/binary-armel/Packages` (796 packages) on the
+repository.maemo.org mirror:
+
+| Package | Version | Released |
+| --- | --- | --- |
+| `openssl`, `libssl0.9.8`, `libssl-dev` | **0.9.8e-9maemo3** | 0.9.8e = Feb 2007 |
+| `libc6`, `libc6-dev` | **2.5.0-1osso10** | glibc 2.5 = Sep 2006 |
+| `linux-kernel-headers` | **2.6.16.osso11-1** | 2.6.16 = Mar 2006 |
+| `libnss3` | 1.0.4-60.19 (Nokia versioning) | — |
+| `libcurl3` | 7.15.5-1osso4 | — |
+| `zlib1g` | 1.2.3-9.osso8 | — |
+| `gcc`, `gcc-3.4` | 4:3.4.4-7osso2 / 3.4.4cs2005q3.2 | — |
+
+From `extras` for diablo (74,981 lines of index):
+
+| Package | Version |
+| --- | --- |
+| `libgnutls13` / `libgnutls26` | 2.0.4-3maemo3 / **2.4.2-5** |
+| `libgcrypt11` | 1.4.1-2 |
+| `python2.5` | 2.5.2-1osso4 |
+| `python2.5-pyopenssl` | 0.6-2osso1 |
+
+The kernel headers are *older* than the running kernel (2.6.21). That is normal
+for the era and matters only in that nothing in the SDK knows about any syscall
+added after 2006.
+
+## Hardware that shapes the build
+
+Confirmed by reading the device's own binaries out of the sysroot, and the
+mainline device tree:
+
+- **`ld-linux.so.3`** is the loader → the device is `armel`, base AAPCS
+  (soft-float *calling convention*). Exactly what `arm-linux-gnueabi` targets.
+  Not `armhf`, which would be `ld-linux-armhf.so.3`.
+- Diablo's `libm-2.5.so` contains **~6,800 VFP instructions**, so the ARM1136JF-S
+  VFPv2 unit is present, enabled, and already used by the stock system.
+  `-mfloat-abi=softfp` is therefore safe and link-compatible.
+- ELF header reads `Version4 EABI`; the ARM attributes section is in the old
+  pre-2008 format that modern `readelf -A` cannot parse. Harmless.
+- 128 MB RAM, confirmed in mainline's `omap2420-n8x0-common.dtsi`
+  (`reg = <0x80000000 0x8000000>`).
+- No usable crypto acceleration: ARM1136 has no NEON and no ARMv8 crypto
+  extensions. This drives the cipher preference in [DECISIONS.md](DECISIONS.md).
+
 Tier 1 prep, session of 2026-09-08. Every decision with the reason and what it
-beat. Nothing here has been tested on hardware yet — see [OPEN.md](OPEN.md).
+beat. Nothing here has been tested on hardware yet — see [README.md](README.md).
 
 ## Scope
 
@@ -40,9 +91,9 @@ beat. Nothing here has been tested on hardware yet — see [OPEN.md](OPEN.md).
 | 21 | **`stunnel` is the first consumer, before `wget`** | It retroactively gives modern TLS to every stock app that can be pointed at localhost, so it is worth more than any single rebuilt client | `wget` first (more obvious, less leverage) |
 | 23 | **`-DBROKEN_CLANG_ATOMICS`: no libatomic at all.** Reverses 20 | Every 64-bit entry point in GCC's libatomic is an `IFUNC`, and glibc 2.5 predates IFUNC by three years, so its loader resolves none of them — shipped or not. `libatomic.a` is IFUNC-based too, so 20's rejected alternative fails identically. Only `crypto/threads_pthread.c` uses the builtins, and OpenSSL's own switch replaces them with mutexes. On one uncontended 400 MHz core that costs nothing measurable | Bundling libatomic (decision 20, wrong); static libatomic (same failure); writing our own IFUNC-free libatomic shim (works, but hand-rolled atomics to avoid mutexes we do not need) |
 | 24 | **Test every build under QEMU against the device's own glibc 2.5** (`tools/qemu-smoke.sh`) | Decision 14 said verify mechanically, and a static checker passed two builds that could not have started. `qemu-arm -L sysroot-diablo` runs the real loader on the real binaries, so the whole class of "links fine, will not load" fails on the build host instead of on the tablet | Trusting `check-artifact.sh` alone; waiting for hardware to find out (which is what let 20 stand) |
-| 25 | **Ship Mozilla's full CA store** (`tools/mk-truststore.sh`), not a trimmed one | ~150 KB of PEM against 2 GB of flash is not a cost worth managing, and a trimmed store is a standing maintenance job that fails closed and confusingly — a site stops working and nothing says why. Fetched over HTTPS from the build host and verified against the published sha256, because the transport is not the trust | A hand-trimmed store (OPEN.md #6); reusing the 2008 store (every root expired or distrusted) |
+| 25 | **Ship Mozilla's full CA store** (`tools/mk-truststore.sh`), not a trimmed one | ~150 KB of PEM against 2 GB of flash is not a cost worth managing, and a trimmed store is a standing maintenance job that fails closed and confusingly — a site stops working and nothing says why. Fetched over HTTPS from the build host and verified against the published sha256, because the transport is not the trust | A hand-trimmed store (README (status) #6); reusing the 2008 store (every root expired or distrusted) |
 | 26 | **Test the checker in both directions before trusting it** | The IFUNC check passed the library it was written to reject, because `pipefail` plus `grep -q` reports SIGPIPE. A check that has only ever returned "ok" is not evidence of anything. Every check now has a known-bad input that must fail it | Adding checks and assuming they work (which hid a vacuous `time_t` check for the whole project) |
-| 27 | **Run the real firmware under full-system QEMU** (`tools/mk-diablo-emulator.sh`, `tools/emulator-smoke.sh`) | Decision 24 tests on the device's glibc but translates syscalls to the host kernel, so it cannot say whether 2.6.21 serves them. Nokia's final N810 release still exists with a matching MD5; unpacked, it gives the real kernel and the real 220 MB userland. This answered the largest question NEXT.md had marked hardware-only, and closed OPEN.md #1 from the firmware rather than the package index | Waiting for the tablet (which is blocked on a battery); trusting the package index for versions |
+| 27 | **Run the real firmware under full-system QEMU** (`tools/mk-diablo-emulator.sh`, `tools/emulator-smoke.sh`) | Decision 24 tests on the device's glibc but translates syscalls to the host kernel, so it cannot say whether 2.6.21 serves them. Nokia's final N810 release still exists with a matching MD5; unpacked, it gives the real kernel and the real 220 MB userland. This answered the largest question README had marked hardware-only, and closed README (status) #1 from the firmware rather than the package index | Waiting for the tablet (which is blocked on a battery); trusting the package index for versions |
 | 28 | **Do not treat emulated timings as measurements** | `openssl speed` runs under emulation and came out matching the ChaCha20-over-AES prediction, which is tempting. QEMU's TCG retranslates ARM to the host ISA and models neither pipeline nor cache, so it distorts exactly the instruction-mix costs that a cipher comparison depends on. Decision 19 stays a prediction | Recording the emulated ratio as confirmation of 19 |
 
 ## Distribution
