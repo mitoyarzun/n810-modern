@@ -36,10 +36,11 @@ beat. Nothing here has been tested on hardware yet — see [OPEN.md](OPEN.md).
 | 17 | **`no-afalgeng`** | The AF_ALG engine needs a far newer kernel | Leaving it on |
 | 18 | **Keep ARM assembly on** | AES, bit-sliced AES, P-256, SHA and Keccak all have ARMv4-baseline paths that run here. On a 400 MHz core this is not a micro-optimisation | `no-asm` for an easier build |
 | 19 | **Prefer ChaCha20-Poly1305 over AES-GCM** | No NEON, no ARMv8 crypto extensions, so AES is table-driven software. ChaCha20 is designed for exactly this kind of 32-bit integer core, and is constant-time without special instructions | Standard AES-first ordering |
-| 20 | **`stunnel` is the first consumer, before `wget`** | It retroactively gives modern TLS to every stock app that can be pointed at localhost, so it is worth more than any single rebuilt client | `wget` first (more obvious, less leverage) |
+| 20 | **Bundle `libatomic.so.1`** rather than static-linking it | ARMv6 has no 64-bit atomic instructions so GCC calls into libatomic, which arrived with GCC 4.7 and does not exist anywhere in Diablo. The toolchain's copy needs only `GLIBC_2.4`, so shipping 40 KB is safer than betting the static library is PIC | Static-linking `libatomic.a`; `-march=armv6k` to get native 64-bit atomics (the ARM1136 in the OMAP2420 is plain ARMv6) |
+| 21 | **`stunnel` is the first consumer, before `wget`** | It retroactively gives modern TLS to every stock app that can be pointed at localhost, so it is worth more than any single rebuilt client | `wget` first (more obvious, less leverage) |
 
 ## Distribution
 
 | # | Decision | Reason | Rejected |
 | --- | --- | --- | --- |
-| 21 | **Serve the repo over plain HTTP, sign the packages** | You cannot fetch the thing that enables HTTPS over HTTPS. Signing gives integrity without needing the transport | An HTTPS-only repo |
+| 22 | **Serve the repo over plain HTTP, sign the packages** | You cannot fetch the thing that enables HTTPS over HTTPS. Signing gives integrity without needing the transport | An HTTPS-only repo |

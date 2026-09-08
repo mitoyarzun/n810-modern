@@ -12,8 +12,9 @@ problem, and no amount of certificate work will fix it.
 This project builds a current OpenSSL for the device, alongside the stock one,
 and then rebuilds the handful of programs worth pointing at it.
 
-**Status: Tier 1 prep. The cross-compilation environment is built and verified.
-Nothing has yet run on hardware.**
+**Status: Tier 1 prep complete. The cross-compilation environment works and
+OpenSSL 3.5.8 builds clean for the device — 5.3 MB of verified, device-safe
+armv6 binaries. Nothing has yet run on hardware.**
 
 ## What works today
 
@@ -39,7 +40,7 @@ project.
 | [OPEN.md](OPEN.md) | Unresolved, and which parts need the device in hand. |
 | [NAME.md](NAME.md) | Why "Handshake". |
 
-## The three flags that matter
+## The flags that matter
 
 If you take nothing else from this repository: cross-compiling for a 2008 device
 from a 2024 host fails in three ways that are **silent on the host and fatal on
@@ -51,6 +52,7 @@ by `tools/check-artifact.sh`.
 | `-B$SYSROOT/usr/lib` | Links the host's `crt1.o`, whose ABI note demands Linux 3.2. Device loader refuses: `FATAL: kernel too old`. |
 | `-nostdinc -isystem …` | Compiles against the host's glibc 2.39 headers, which sit ahead of the sysroot in the search path even with `--sysroot`. |
 | `-U_FILE_OFFSET_BITS -U_TIME_BITS` | Ubuntu 24.04 enables 64-bit time_t/LFS by default on 32-bit targets. glibc 2.5 predates both. |
+| `-fgnu89-inline` | glibc 2.5's `string2.h` uses GNU89 `extern __inline`; GCC's C99 rules emit it everywhere. |
 
 ## Expectations
 

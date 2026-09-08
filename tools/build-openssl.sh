@@ -50,6 +50,18 @@ make -j"$JOBS"
 echo "==> Staging into $OUT"
 rm -rf "$OUT" && make DESTDIR="$OUT" install_sw install_ssldirs
 
+# GCC 4.7+ emits calls into libatomic for 64-bit atomics on ARMv6, which has no
+# 64-bit atomic instructions. Diablo's newest compiler is GCC 4.2, so it has no
+# libatomic at all -- it is absent from every Diablo package index. Ship the
+# toolchain's, which we verify needs nothing newer than GLIBC_2.4.
+if "$STRIP" --version >/dev/null 2>&1 &&
+   $TARGET-readelf -d "$OUT/opt/handshake/lib/libcrypto.so.3" | grep -q 'libatomic\.so\.1'; then
+  echo "==> Bundling libatomic.so.1 (absent from Diablo)"
+  src=$($TARGET-gcc -print-file-name=libatomic.so.1)
+  [ -e "$src" ] || { echo "    cannot find libatomic.so.1"; exit 1; }
+  cp -L "$src" "$OUT/opt/handshake/lib/libatomic.so.1"
+fi
+
 echo "==> Stripping"
 find "$OUT" -type f \( -name '*.so*' -o -perm -u+x \) -print0 |
   while IFS= read -r -d '' f; do
@@ -58,7 +70,7 @@ find "$OUT" -type f \( -name '*.so*' -o -perm -u+x \) -print0 |
 
 echo "==> Verifying"
 mapfile -t artefacts < <(find "$OUT" -type f \( -name '*.so*' -o -name openssl \) | sort)
-"$HERE/check-artifact.sh" "${artefacts[@]}"
+EXTRA_LIBDIR="$OUT/opt/handshake/lib" "$HERE/check-artifact.sh" "${artefacts[@]}"
 
 echo
 echo "Staged tree ($(du -sh "$OUT" | cut -f1)):"

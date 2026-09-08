@@ -148,6 +148,64 @@ glibc 2.5 on ARM has no `ucontext` implementation, so OpenSSL's fibre-based
 ASYNC could never work. Added `no-async` rather than shipping a feature that
 fails at runtime.
 
+## 6. `libatomic.so.1` — the build was clean and would still not have loaded
+
+The fourth build completed: libraries linked, `install_sw` staged a tree, and
+every artefact passed `check-artifact.sh`. Then the dependency list:
+
+```
+libcrypto.so.3  NEEDED: libdl.so.2 libatomic.so.1 libpthread.so.0 libc.so.6
+```
+
+**`libatomic.so.1`.** ARMv6 has no 64-bit atomic instructions, so GCC emits
+calls into libatomic for them. libatomic arrived with GCC 4.7 in 2012. Diablo's
+newest compiler is GCC 4.2, and `libatomic` appears **zero** times across both
+the SDK index (796 packages) and the extras index. On the device this is:
+
+```
+libatomic.so.1: cannot open shared object file
+```
+
+A perfectly clean build, verified by a checker that passed it, that could never
+have started.
+
+The fix is easy — the toolchain's `libatomic.so.1` needs nothing newer than
+`GLIBC_2.4`, so it can travel with us; 40 KB. The lesson is not the fix. It is
+that the checker was only testing the properties we had already been burned by.
+So `check-artifact.sh` now resolves **every** `NEEDED` soname against a stock
+Diablo baseline and fails on anything that is neither in it nor shipped
+alongside. That check catches this whole class rather than this one instance.
+
+## Result
+
+```
+== out/opt/handshake/bin/openssl
+   ok    ABI note 2.6.8
+   ok    glibc symbols <= GLIBC_2.4
+   ok    no 64-bit time_t symbols
+   ok    interpreter /lib/ld-linux.so.3
+   ok    libssl.so.3 ships with us
+   ok    libcrypto.so.3 ships with us
+...
+All artefacts look device-safe.
+```
+
+OpenSSL 3.5.8, `linux-armv4`, ARM assembly enabled (AES, bit-sliced AES,
+P-256, SHA-1/256/512, Keccak, Poly1305). On-device footprint:
+
+| | |
+| --- | --- |
+| `libcrypto.so.3` | 3.6 MB |
+| `libssl.so.3` | 832 KB |
+| `openssl` CLI | 772 KB |
+| `libatomic.so.1` | 40 KB |
+| `legacy.so` provider | 88 KB |
+| **runtime total** | **5.3 MB** |
+
+Static libraries (8.3 MB) and headers (2.3 MB) stay on the build host.
+
+Not yet proven: that any of it runs. That needs the device.
+
 ## Summary: the five flags
 
 | Flag | Failure it prevents | When you'd find out |

@@ -22,9 +22,10 @@ hand. Session of 2026-09-08.
    OpenSSL, it is `hello`. Copy it over, run it, and confirm no
    `FATAL: kernel too old`. If that fails, nothing else matters.
 
-3. **Free space.** OpenSSL 3.5 is ~5.5 MB of shared libraries before the
-   provider modules. Check what the rootfs and the 2 GB internal flash actually
-   have, and decide where `/opt/handshake` really lives.
+3. **Free space.** The built runtime is **5.3 MB** (libcrypto 3.6 MB, libssl
+   832 KB, openssl CLI 772 KB, libatomic 40 KB, legacy provider 88 KB). Check
+   what the rootfs and the 2 GB internal flash actually have, and decide where
+   `/opt/handshake` really lives.
 
 4. **Does `/dev/urandom` behave?** Seeding is configured to use it exclusively.
    Confirm it exists, is readable, and is not starved early in boot.

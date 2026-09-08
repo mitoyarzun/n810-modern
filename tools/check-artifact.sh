@@ -67,8 +67,33 @@ for f in "$@"; do
     fi
   fi
 
-  # 6. Anything it needs that Diablo does not ship must travel with it.
+  # 6. Every NEEDED library must either exist on a stock Diablo device or
+  #    travel with us. This is the check that catches libatomic.so.1: GCC 4.7+
+  #    emits calls to it for 64-bit atomics on ARMv6, and Diablo -- whose
+  #    newest compiler is GCC 4.2 -- has never heard of it. The build succeeds,
+  #    the checker used to pass it, and the device says:
+  #        libatomic.so.1: cannot open shared object file
   needed=$($T-readelf -d "$f" 2>/dev/null | grep -oE 'Shared library: \[[^]]+\]' | sed 's/.*\[\(.*\)\]/\1/')
+  for lib in $needed; do
+    case "$lib" in
+      # Shipped by glibc 2.5 / the stock Diablo rootfs.
+      libc.so.6|libm.so.6|libpthread.so.0|libdl.so.2|librt.so.1|libcrypt.so.1|\
+      libnsl.so.1|libresolv.so.2|libutil.so.1|ld-linux.so.3|libgcc_s.so.1|libz.so.1)
+        ;;
+      *)
+        # Otherwise it must sit next to the artefact, or in $EXTRA_LIBDIR.
+        d=$(dirname "$f")
+        # Look beside it, one level up (lib/ossl-modules -> lib), and in a
+        # sibling lib/ (bin -> ../lib).
+        if [ -e "$d/$lib" ] || [ -e "$d/../$lib" ] || [ -e "$d/../lib/$lib" ] ||
+           { [ -n "${EXTRA_LIBDIR:-}" ] && [ -e "$EXTRA_LIBDIR/$lib" ]; }; then
+          echo "   ok    $lib ships with us"
+        else
+          echo "   FAIL  needs $lib, which Diablo does not have and we do not ship"; bad=1
+        fi
+        ;;
+    esac
+  done
   [ -n "$needed" ] && echo "   note  NEEDED: $(echo $needed | tr '\n' ' ')"
 
   [ $bad -eq 0 ] || rc=1
