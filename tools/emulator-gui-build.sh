@@ -74,7 +74,15 @@ cat > rootfs/usr/sbin/dsmetool <<'DT'
 #!/bin/sh
 # Stand-in for dsmetool while DSME is disabled: run what we are asked to run,
 # log its output, ignore the supervision. See tools/emulator-gui-build.sh.
+#
+# The log path must DEGRADE, never fail. Matchbox and hildon-desktop are
+# launched as uid 29999, and when the redirect below could not create a
+# root-owned log the whole command failed -- so the two processes this shim
+# exists to start were the two it silently killed, while root-launched X
+# survived and made it look like a desktop problem.
 log=/var/log/dsmetool.log
+{ : >>"$log"; } 2>/dev/null || log=/tmp/dsmetool.log
+{ : >>"$log"; } 2>/dev/null || log=/dev/null
 while [ $# -gt 0 ]; do
   case "$1" in
     -r|-t) shift; [ -n "${1:-}" ] && sh -c "$1" >>"$log" 2>&1 & ;;
@@ -86,6 +94,8 @@ exit 0
 DT
 chmod 0755 rootfs/usr/sbin/dsmetool
 mkdir -p rootfs/var/log
+: > rootfs/var/log/dsmetool.log
+chmod 0666 rootfs/var/log/dsmetool.log
 
 echo "==> 4. Restoring ownership under /home/user"
 # jefferson does not preserve uid/gid, so the extracted tree is entirely
@@ -109,7 +119,39 @@ echo "==> 5. Disabling dsp-init"
 # DSP: it is for audio and video decode.
 rm -f rootfs/etc/rc2.d/S24dsp-init rootfs/etc/rc5.d/S24dsp-init
 
-echo "==> 6. Building fb-autoupdate for the guest"
+echo "==> 6. Restoring hardlinks jefferson dropped"
+# jefferson writes only ONE name per inode, so the second and later names of a
+# hardlink set vanish. dpkg's file lists say they should be there:
+#     /usr/bin/sudo      missing, while /usr/bin/sudoedit is present and is
+#                        the same setuid-root binary (-rwsr-xr-x, 88520 bytes)
+#     /usr/bin/perl      missing, while /usr/bin/perl5.8.3 is present
+# The absence is not cosmetic. Three Diablo scripts call sudo, and each one
+# fails with "sudo: not found":
+#     /usr/bin/hildon-input-method-configurator: line 11: sudo: not found
+#     /etc/osso-af-init/real-af-services: ... sudo: not found
+# Re-linking is exact rather than a workaround: it is the same inode the
+# device itself has, setuid bit and all.
+for pair in "sudoedit:sudo" "perl5.8.3:perl"; do
+  have=${pair%:*}; want=${pair#*:}
+  if [ -e "rootfs/usr/bin/$have" ] && [ ! -e "rootfs/usr/bin/$want" ]; then
+    ln "rootfs/usr/bin/$have" "rootfs/usr/bin/$want" 2>/dev/null ||
+      cp -a "rootfs/usr/bin/$have" "rootfs/usr/bin/$want"
+    echo "    linked /usr/bin/$want -> $have"
+  fi
+done
+
+echo "==> 7. Creating the gconf directory ke-recv expects"
+# /etc/osso-af-init/gconf-dir is a symlink to /var/lib/gconf, and ke-recv wants
+# to put a symlink inside it:
+#     ln -s /tmp/gconf-dir/system/osso/af /etc/osso-af-init/gconf-dir/system/osso/af
+# /var/lib/gconf exists but system/osso beneath it does not, so this fails:
+#     ln: /etc/osso-af-init/gconf-dir/system/osso/af: No such file or directory
+# hildon-desktop reads its plugin configuration from gconf, which fits a
+# desktop that paints its wallpaper and then waits on a spinner.
+mkdir -p rootfs/var/lib/gconf/system/osso
+chmod 0755 rootfs/var/lib/gconf/system rootfs/var/lib/gconf/system/osso
+
+echo "==> 8. Building fb-autoupdate for the guest"
 # The panel is manual-update: QEMU's blizzard model only redraws when the
 # guest pushes pixels through the controller's data port, and has no
 # continuous redraw. fb-progress pushes; Xomap does not, so the desktop draws
@@ -134,7 +176,7 @@ else
 fi
 
 if [ "${DEBUG_SHELL:-0}" = "1" ]; then
-  echo "==> 7. Adding a display diagnostic dump (DEBUG_SHELL=1)"
+  echo "==> 9. Adding a display diagnostic dump (DEBUG_SHELL=1)"
   # QEMU's n810 machine wires only the FIRST UART, so a second -serial is
   # silently never created and a shell on ttyS1 is unreachable. Everything
   # here therefore goes to the console, which is the path already proven by

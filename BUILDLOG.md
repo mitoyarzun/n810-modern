@@ -623,6 +623,111 @@ user-mode, which has the host's network.
 
 The two tools are `tools/mk-diablo-emulator.sh` and `tools/emulator-smoke.sh`.
 
+## 11. The desktop — eight fixes, and what each one taught
+
+Section 10 got the real firmware booting to a shell, which is all the TLS work
+needs. Reaching the **desktop** is a different problem, and it took eight
+fixes. They are worth recording not for their own sake but because seven of
+the eight failed *silently* or reported something misleading.
+
+### The chain
+
+| # | What it said | What it was |
+| --- | --- | --- |
+| 1 | `Bad battery type: 65535, shutting down` | the emulator has no battery, and DSME powers the machine off |
+| 2 | `Entering state ''` → panic | `dsme_state` comes from DSME, which is now off |
+| 3 | `Entering state 'MALF'` → panic | `boot()` re-queries `bootstate` after mounting |
+| 4 | `Error, X server did not start` | 20 init scripts launch daemons via `dsmetool -r`, which needs DSME |
+| 5 | `Permission denied` writing its own config | `jefferson` does not preserve uid/gid |
+| 6 | X restarting four times, no desktop | `dsp-init` fails; QEMU cannot load a DSP binary |
+| 7 | frozen splash, healthy X | nobody flushes a manual-update panel |
+| 8 | `sudo: not found`, three scripts | `jefferson` drops hardlinks |
+
+Five of those are consequences of fix 1. Disabling DSME is invasive: on Maemo,
+DSME is both the process supervisor **and** part of the boot state machine.
+Every later failure came from removing it, and each was only visible after the
+previous one cleared.
+
+### The two that were mine
+
+**The shim killed what it was watching.** The `dsmetool` stand-in logged each
+daemon's output to `/var/log/dsmetool.log`. Matchbox and hildon-desktop launch
+as uid 29999; the redirect could not create a root-owned file, the command
+failed, and the two processes the shim existed to start were the two it
+silently killed. X survived because it launches as root — which made this look
+like a desktop bug for several rounds. **Instrumentation must degrade, never
+fail.** The log path now falls back to `/tmp`, then `/dev/null`.
+
+**A test that could not decide.** Writing noise to `/dev/fb0` was supposed to
+prove whether the framebuffer path was alive. It cannot: the panel is
+manual-update, so a plain write never reaches the screen either way. The test
+could not separate "path dead" from "no ioctl sent" — the same vacuous-check
+failure as section 8, in different clothes.
+
+### The display, which is the interesting one
+
+The N800/N810 panel is **manual-update**. QEMU is faithful to this. From
+`hw/display/blizzard.c`, the emulated controller redraws only when the guest
+pushes pixels through its data port at register `0x90`:
+
+```c
+if (!s->data.len && !blizzard_transfer_setup(s)) break;
+*s->data.ptr ++ = value;
+if (-- s->data.len == 0) blizzard_window(s);
+```
+
+There is no continuous redraw loop. `fb-progress` and `show_image` push
+explicitly, which is why the boot splash and the Nokia logo always rendered.
+`Xomap` does not, so the desktop drew into memory nobody flushed and the screen
+stayed frozen on the splash while everything above it was healthy.
+
+`tools/fb-autoupdate.c` asks the driver to refresh on its own timer with
+`OMAPFB_SET_UPDATE_MODE`, `_IOW('O', 40, int)`. It is cross-compiled for the
+guest with **this project's own toolchain** — the first thing built here that
+is neither OpenSSL nor stunnel, and a better proof that the build environment
+generalises than anything in the README.
+
+The proof it worked was accidental and complete: the noise from the failed
+`dd` test appeared on screen the moment auto-update came on — 163 rows of it,
+which is exactly 256 KB at 800x480x16bpp.
+
+### What `jefferson` costs
+
+It exits 0 and loses two things, neither documented:
+
+- **uid/gid** — the whole tree extracts as `root:root`
+- **hardlinks** — only the first name per inode survives
+
+The second is subtle. `/usr/bin/sudo` was "missing" while `/usr/bin/sudoedit`
+sat there as the identical setuid-root binary; they are one inode on the
+device. Restoring the link is exact, not a workaround. Checking the tree
+against dpkg's own file lists found both classes at once, and is worth doing
+after any JFFS2 extraction:
+
+```sh
+for l in rootfs/var/lib/dpkg/info/*.list; do
+  while read -r f; do [ -e "rootfs$f" ] || echo "$f"; done < "$l"
+done
+```
+
+Most of what that reports is `/usr/share/doc` and man pages, which Maemo
+genuinely strips from the device. Filter to `bin/`, `sbin/` and `.so` and the
+real losses stand out — there were eight.
+
+### The through-line
+
+Every expensive bug today was silent: `pipefail` returning 141 so a check could
+never fail (§8), `libatomic` shipping fine and unresolvable (§7), a zero-filled
+flash mounting as an empty filesystem (§10), a shim killing exactly the
+processes under investigation (§11). None announced itself; all presented as
+something else.
+
+The habit that works is not cleverness, it is **instrument first**. The two
+findings that actually moved this forward — the `dsmetool` discovery and the
+DSP loop — both came from a log that was deliberately captured, and each took
+one read. Everything else was theorising from the console, and produced three
+consecutive wrong diagnoses.
+
 ## Result
 
 ```
