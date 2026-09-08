@@ -19,11 +19,17 @@ armv6 binaries. Nothing has yet run on hardware.**
 ## What works today
 
 ```sh
+tools/setup-host.sh          # cross-compiler + prerequisites (Debian/Ubuntu)
 tools/mk-sysroot.sh          # 27 MB Diablo sysroot, checksummed, from mirrors
 . tools/env.sh               # cross-env: modern GCC -> glibc 2.5
 tools/build-openssl.sh       # OpenSSL 3.5 LTS for armv6
 tools/check-artifact.sh FILE # prove a binary will actually run on the device
+tools/device-smoke-test.sh   # run this ON the tablet
 ```
+
+End to end that is about fifteen minutes on four cores, and it produces 5.3 MB
+of verified armv6 runtime: `libcrypto.so.3`, `libssl.so.3`, the `openssl` CLI,
+the legacy provider, and a bundled `libatomic.so.1`.
 
 The environment is the real deliverable. Once it exists, every later package —
 `stunnel`, `wget`, `curl`, `git`, NetSurf — is an afternoon rather than a
