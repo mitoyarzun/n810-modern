@@ -75,8 +75,10 @@ hardware. Item 2 is answered. See [BUILDLOG §7](BUILDLOG.md).
 
 ## Unresolved technical questions
 
-9. **Does `stunnel` need anything Diablo lacks?** Not yet investigated. It is
-   the highest-leverage consumer, so this should be checked before `wget`.
+9. ~~**Does `stunnel` need anything Diablo lacks?**~~ **Answered: no.** It
+   cross-builds first time and needs `libutil.so.1` on top of libc, pthreads
+   and our OpenSSL — all stock. Proven under QEMU to wrap a plain-HTTP client
+   into a verified TLS 1.3 connection. See BUILDLOG §9.
 
 10. **Certificate validation needs a correct clock.** The N810's RTC depends on
     the backup battery, which on an 18-year-old device may well be dead. If the

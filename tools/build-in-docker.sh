@@ -32,12 +32,15 @@ tools/setup-host.sh
 tools/mk-sysroot.sh
 tools/build-openssl.sh
 tools/mk-truststore.sh
+tools/build-stunnel.sh
 if [ $TEST -eq 1 ]; then
   echo
   tools/qemu-smoke.sh
+  echo
+  tools/qemu-stunnel-test.sh
 fi
 echo
 echo '==> Packaging'
-tar czf handshake-openssl-diablo-armel.tar.gz -C out opt
-sha256sum handshake-openssl-diablo-armel.tar.gz
+tar czf handshake-diablo-armel.tar.gz -C out opt
+sha256sum handshake-diablo-armel.tar.gz
 "

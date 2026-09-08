@@ -154,30 +154,26 @@ ships with a current trust store.
 
 ---
 
-## Step 4 — stunnel
-
-The highest-leverage consumer, and the reason it comes before `wget`: it
-retroactively gives modern TLS to *every* stock app that can be pointed at
-localhost. Once it exists, the Tier 0 LAN-proxy workaround stops needing a
-second machine.
+## Step 4 — stunnel — **done**
 
 ```sh
-. tools/env.sh
-./configure --host=arm-linux-gnueabi --prefix=/opt/handshake \
-            --with-ssl=$PWD/out/opt/handshake
+tools/build-stunnel.sh
+tools/qemu-stunnel-test.sh
 ```
 
-`libcrypto.pc` is scrubbed of `-latomic` at build time, so stunnel will not
-inherit the dependency that BUILDLOG §7 is about. Check its `NEEDED` list
-anyway, and put the result through `tools/qemu-smoke.sh` — the point of that
-tool is that a consumer can be proven to load before the tablet exists.
+Built first time. OPEN.md #9 is answered: stunnel needs nothing Diablo lacks.
+Its `NEEDED` list is `libssl.so.3 libcrypto.so.3 libutil.so.1 libpthread.so.0
+libc.so.6 ld-linux.so.3` — two ours, four stock.
 
-Unknown: whether stunnel needs anything Diablo lacks (OPEN.md #9). Check before
-committing to it. Write `tools/build-stunnel.sh` in the same shape as
-`build-openssl.sh`, and run everything through `check-artifact.sh`.
+Proven under QEMU: a **plain HTTP** client reaches `example.org` over TLS 1.3
+with `X25519MLKEM768` and a verified chain. That is a stock Diablo application
+getting modern TLS without being rebuilt, which is the reason this package came
+before `wget`. See [BUILDLOG §9](BUILDLOG.md).
 
-**Done when** a stock Diablo app configured to use `localhost:<port>` reaches a
-TLS 1.3 site.
+**Still to do on the device:** write the real config. The test config is a
+single client tunnel to one host. What the tablet wants is a small set of
+services on fixed local ports, and a note in the README saying which port maps
+to what.
 
 ---
 

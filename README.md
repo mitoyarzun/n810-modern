@@ -16,7 +16,9 @@ and then rebuilds the handful of programs worth pointing at it.
 environment works, OpenSSL 3.5.8 builds clean for the device, and it runs under
 QEMU on the device's own glibc 2.5 loader — it starts, loads both providers,
 generates keys, and completes a TLS 1.3 handshake to example.org with
-`Verification: OK`. 5.3 MB of armv6 binaries.
+`Verification: OK`. stunnel 5.80 builds on top of it and turns a plain-HTTP
+client into a verified TLS 1.3 connection, which is modern TLS for stock
+applications that will never be rebuilt.
 Nothing has yet run on hardware; the tablet's battery is swollen and is being
 replaced.**
 
@@ -28,8 +30,10 @@ tools/mk-sysroot.sh          # 27 MB Diablo sysroot, checksummed, from mirrors
 . tools/env.sh               # cross-env: modern GCC -> glibc 2.5
 tools/build-openssl.sh       # OpenSSL 3.5 LTS for armv6
 tools/mk-truststore.sh       # current CA store, checksum-verified
+tools/build-stunnel.sh       # stunnel 5.80, linked against the above
 tools/check-artifact.sh FILE # static checks: will this binary run on the device
 tools/qemu-smoke.sh          # actually run it, on the device's own glibc 2.5
+tools/qemu-stunnel-test.sh   # plain HTTP in, verified TLS 1.3 out
 tools/device-smoke-test.sh   # run this ON the tablet
 tools/build-in-docker.sh     # all of the above, on any host with Docker
 ```

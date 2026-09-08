@@ -367,6 +367,78 @@ without running it, checking a property without testing the checker, and
 trusting a green result that no red result had ever been seen from. **A test
 that has only ever passed is not evidence.**
 
+## 9. stunnel — the one that just worked
+
+OPEN.md #9 asked whether stunnel needs anything Diablo lacks. It was the last
+unknown before the consumer work, and the honest answer was that nobody had
+looked. A cross-build answers it in ten minutes and needs no device.
+
+It built first time. `tools/build-stunnel.sh` is `build-openssl.sh` with a
+different tarball and four `configure` flags:
+
+```
+--disable-systemd    Diablo predates systemd by five years
+--disable-libwrap    tcp_wrappers is not in the Diablo index
+--disable-fips       needs a validated provider we do not ship
+--with-ssl=$OUT/opt/handshake
+```
+
+Plus two `ac_cv_*` cache variables, because autoconf answers those questions by
+running a test program and cross-compiling cannot run one.
+
+The dependency list is the answer to #9:
+
+```
+stunnel  NEEDED: libssl.so.3 libcrypto.so.3 libutil.so.1 libpthread.so.0
+                 libc.so.6 ld-linux.so.3
+```
+
+Two are ours. The rest are stock Diablo, `libutil.so.1` included. **stunnel
+needs nothing the device does not have.**
+
+### Proving it, again without the device
+
+`tools/qemu-stunnel-test.sh` runs the armel stunnel under `qemu-arm` on glibc
+2.5, in client mode, and then speaks **plain HTTP** to it:
+
+```
+1. It starts at all
+   ok    stunnel 5.80 on arm-unknown-linux-gnueabi platform
+         Compiled/running with OpenSSL 3.5.8
+         Threading:PTHREAD Sockets:POLL,IPv6 TLS:ENGINE,OCSP,PSK,SNI,DTLS
+2. It runs as a client tunnel
+   ok    listening on 127.0.0.1:18443
+3. Plain HTTP in, TLS 1.3 out
+   ok    HTTP/1.1 200 OK
+4. What stunnel negotiated
+         Certificate accepted at depth=0: CN=example.org
+         Negotiated TLSv1.3 group: X25519MLKEM768
+         TLSv1.3 ciphersuite: TLS_AES_256_GCM_SHA384 (256-bit encryption)
+   ok    TLS 1.3 negotiated, chain verified to the leaf
+```
+
+That third step is the entire point of the package. The client speaking to
+stunnel used no TLS at all — exactly what a stock Diablo application can do.
+
+`X25519MLKEM768` is worth a second look. A device from 2008 negotiating a
+post-quantum hybrid key exchange, because none of that lives in the kernel or
+the libc — it is all in the library we replaced.
+
+### One test bug
+
+The first run passed traffic and then failed:
+
+```
+3. Plain HTTP in, TLS 1.3 out      ok    HTTP/1.1 200 OK
+4. What stunnel negotiated         FAIL  no TLS 1.3 in the stunnel log
+```
+
+The config said `debug = 4`. stunnel logs the negotiated protocol and the
+verified chain at level 6. The tunnel worked; the evidence was switched off.
+Section 8's rule applied in reverse — a test that fails for the wrong reason is
+as misleading as one that cannot fail — so the fix was to raise the level and
+filter the 121 CA-loading lines that then bury the four that matter.
+
 ## Result
 
 ```
@@ -397,10 +469,15 @@ Static libraries (8.3 MB) and headers (2.3 MB) stay on the build host.
 Proven under QEMU on the device's own glibc 2.5 loader:
 
 ```
-1. It starts at all          ok   OpenSSL 3.5.8, linux-armv4
-2. Providers load            ok   default, legacy
-3. Crypto works              ok   sha256, random, RSA keygen, EC keygen
-4. TLS 1.3 to example.org    ok   TLS_AES_256_GCM_SHA384, Verification: OK
+openssl   1. It starts at all        ok   OpenSSL 3.5.8, linux-armv4
+          2. Providers load          ok   default, legacy
+          3. Crypto works            ok   sha256, random, RSA + EC keygen
+          4. TLS 1.3 to example.org  ok   TLS_AES_256_GCM_SHA384, Verify OK
+
+stunnel   1. It starts at all        ok   stunnel 5.80, arm-unknown-linux-gnueabi
+          2. Client tunnel runs      ok   listening on 127.0.0.1
+          3. Plain HTTP in, TLS out  ok   HTTP/1.1 200 OK
+          4. What it negotiated      ok   TLS 1.3, X25519MLKEM768, chain verified
 ```
 
 Not yet proven: that the real 2.6.21 kernel serves every syscall it makes, and
