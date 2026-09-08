@@ -46,6 +46,8 @@ cat <<INFO
     mouse        acts as the touchscreen
     keyboard     acts as the hardware keyboard
     serial log   $WORK/gui-serial.log
+    monitor      $WORK/monitor.sock  -- for a screenshot without a client:
+                 echo "screendump /tmp/shot.ppm" | socat - UNIX-CONNECT:$WORK/monitor.sock
 
     Booting to the desktop takes several minutes under emulation.
     Ctrl-C stops it.
@@ -58,4 +60,5 @@ exec qemu-system-arm -M n810 -m 128 \
   -append "console=ttyS0,115200n8 root=/dev/mtdblock3 rootfstype=jffs2 rw init=/linuxrc" \
   -serial file:"$WORK/gui-serial.log" \
   -vnc "$BIND:$DISPLAY_N" \
+  -monitor "unix:$WORK/monitor.sock,server,nowait" \
   -no-reboot
