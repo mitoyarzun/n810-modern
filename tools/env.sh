@@ -46,7 +46,27 @@ GCC_INTERNAL_INCLUDE="$($TARGET-gcc -print-file-name=include)"
 
 ARCH_FLAGS="-march=armv6 -mtune=arm1136jf-s -mfloat-abi=softfp -mfpu=vfp"
 SYSROOT_FLAGS="--sysroot=$DIABLO_SYSROOT -B$DIABLO_SYSROOT/usr/lib"
-INCLUDE_FLAGS="-nostdinc -isystem $GCC_INTERNAL_INCLUDE -isystem $DIABLO_SYSROOT/usr/include"
+# Our own staged headers must come BEFORE the sysroot's, and this ordering is
+# load-bearing for every package after the first.
+#
+# The sysroot is the device: it contains Diablo's zlib 1.2.3 headers from 2005.
+# Once we ship a newer zlib of our own, anything compiled against the sysroot's
+# copy fails -- curl 8.x dies on `z_const undeclared`, a macro zlib gained in
+# 1.2.6 (2012).
+#
+# Passing our prefix as -I does NOT fix it. GCC ignores a -I directory that is
+# also given as -isystem, and packages add their own -isystem for the prefix
+# you point them at (curl's configure even rewrites -I to -isystem on purpose:
+# "checking convert -I options to -isystem"). The -I is dropped, ours lands
+# behind the sysroot in -isystem order, and the 2005 header wins. That is
+# invisible: the error names a macro in the consuming package, with the correct
+# header installed two directories away.
+#
+# So the staging prefix goes first in the -isystem chain, here, once.
+HANDSHAKE_STAGE="${HANDSHAKE_STAGE:-$PWD/out/opt/handshake}"
+STAGE_INCLUDE=""
+[ -d "$HANDSHAKE_STAGE/include" ] && STAGE_INCLUDE="-isystem $HANDSHAKE_STAGE/include"
+INCLUDE_FLAGS="-nostdinc -isystem $GCC_INTERNAL_INCLUDE $STAGE_INCLUDE -isystem $DIABLO_SYSROOT/usr/include"
 
 # Ubuntu 24.04 ships its 32-bit cross-compilers with the 64-bit time_t / large
 # file transition ON BY DEFAULT: GCC predefines _FILE_OFFSET_BITS=64 and
@@ -77,7 +97,10 @@ export RANLIB="$TARGET-ranlib"
 export STRIP="$TARGET-strip"
 export LD="$TARGET-ld"
 export CFLAGS="-O2 -pipe"
-export LDFLAGS="-Wl,-z,noexecstack"
+# Match the include ordering: our staged libraries before the sysroot's.
+STAGE_LIB=""
+[ -d "$HANDSHAKE_STAGE/lib" ] && STAGE_LIB="-L$HANDSHAKE_STAGE/lib"
+export LDFLAGS="-Wl,-z,noexecstack $STAGE_LIB"
 
 # Where built artefacts land on the device. Deliberately NOT /usr: the whole
 # point is to sit alongside the stock OpenSSL 0.9.8e, never on top of it. Also
@@ -89,3 +112,4 @@ echo "diablo cross-env ready"
 echo "  sysroot   $DIABLO_SYSROOT (glibc 2.5, headers 2.6.16)"
 echo "  target    $TARGET (armv6, softfp, ld-linux.so.3)"
 echo "  prefix    $HANDSHAKE_PREFIX (on-device)"
+[ -n "$STAGE_INCLUDE" ] && echo "  staged    $HANDSHAKE_STAGE (our headers precede the sysroot's)"
