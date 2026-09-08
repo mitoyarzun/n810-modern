@@ -43,7 +43,8 @@ project.
 | [DESIGN.md](DESIGN.md) | The cross-compilation environment, the OpenSSL package, the consumers, and what this deliberately does not do. |
 | [DECISIONS.md](DECISIONS.md) | Every decision with its reason and what it beat. |
 | [BUILDLOG.md](BUILDLOG.md) | What actually happened when we built it, including three failures worth knowing about. |
-| [OPEN.md](OPEN.md) | Unresolved, and which parts need the device in hand. |
+| [OPEN.md](OPEN.md) | Unresolved questions, and which parts need the device in hand. |
+| [NEXT.md](NEXT.md) | **Start here to continue.** Ordered actions, each with a definition of done. |
 | [NAME.md](NAME.md) | Why "Handshake". |
 
 ## The flags that matter
