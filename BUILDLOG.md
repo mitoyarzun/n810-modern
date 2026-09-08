@@ -367,6 +367,30 @@ without running it, checking a property without testing the checker, and
 trusting a green result that no red result had ever been seen from. **A test
 that has only ever passed is not evidence.**
 
+### Postscript: it came back the same day
+
+`tools/emulator-smoke.sh`, written a few hours after the above, contained:
+
+```sh
+tr '\000' '\377' < /dev/zero | head -c $TOTAL > flash.img
+```
+
+`head -c` exits after N bytes, `tr` dies of SIGPIPE, `pipefail` reports 141,
+and `set -e` aborts the script — silently, halfway through, with no error. The
+run simply stopped after "Building the OneNAND image".
+
+Knowing about a trap is not the same as not falling into it. The durable fix is
+structural, not vigilance: **put the finite producer first**, so nothing has to
+die of SIGPIPE.
+
+```sh
+head -c "$TOTAL" /dev/zero | tr '\000' '\377' > flash.img
+[ "$(stat -c%s flash.img)" = "$TOTAL" ] || exit 1
+```
+
+The assertion on the next line is there because this is the third distinct way
+this one file has been silently wrong.
+
 ## 9. stunnel — the one that just worked
 
 OPEN.md #9 asked whether stunnel needs anything Diablo lacks. It was the last
@@ -439,6 +463,166 @@ Section 8's rule applied in reverse — a test that fails for the wrong reason i
 as misleading as one that cannot fail — so the fix was to raise the level and
 filter the 121 CA-loading lines that then bury the four that matter.
 
+## 10. The real device, in an emulator
+
+Sections 7 to 9 all carry the same caveat: `qemu-arm` runs our binaries on the
+device's glibc, but it translates syscalls to the **host** kernel. So none of
+it could answer the question NEXT.md said only the tablet could — does Linux
+2.6.21 serve every syscall OpenSSL 3.5 makes?
+
+It can be answered, and without the tablet.
+
+### Getting the actual device
+
+Nokia's `tablets-dev.nokia.com` has been dead for years, but `skeiron.org`
+mirrors it, and the final Diablo release for the N810 is still there with
+Nokia's own published MD5 beside it:
+
+```
+RX-44_DIABLO_5.2008.43-7_PR_COMBINED_MR0_ARM.bin
+md5 a0738fcc7b556d1c6d49d796b48a7a37   <- matches MD5SUMS
+```
+
+`0xFFFF` unpacks the FIASCO container into the parts:
+
+```
+kernel_2.6.21-200842maemo1        ARM zImage, the real kernel
+initfs_0.95.22-200842maemo1w38b3  jffs2
+rootfs_..._DIABLO_5.2008.43-7     jffs2, 125 MB
+xloader / secondary / 2nd         bootloaders, per HW revision
+```
+
+`jefferson` extracts the rootfs to a directory: 220 MB, 622 packages. That is
+the device's userland, on disk, before anything has been switched on.
+
+### What it settles immediately
+
+Every version in [RESEARCH.md](RESEARCH.md) came from the Diablo package index,
+which is not the same thing as the device. Now they can be read from the
+firmware itself, and OPEN.md #1 closes:
+
+| | Package index said | Firmware says |
+| --- | --- | --- |
+| glibc | 2.5 | `libc-2.5.so`, `ld-linux.so.3` |
+| libc6 | 2.5.0-1osso10 | 2.5.0-1osso10 |
+| zlib1g | 1:1.2.3-9.osso8 | 1:1.2.3-9.osso8 |
+| OpenSSL | 0.9.8e | 0.9.8e-9maemo3 |
+| libcurl3 | 7.15.5 | 7.15.5-1osso4 |
+| kernel | 2.6.21 | `Linux version 2.6.21-omap1 ... #2 Tue Oct 14 2008` |
+
+Both sysroot pins are exactly right. One thing the index could not have told
+us: **a stock Diablo device has no `openssl` CLI, no `wget`, no `curl` and no
+Python at all** — only the `libssl0.9.8` library. That changes what a first
+session with the tablet can even do, and it is an argument for shipping the
+CLI.
+
+### Booting it
+
+`qemu-system-arm -M n810` still exists in QEMU 8.2 (Ubuntu 24.04). It was
+**removed in QEMU 9.2**, so this needs 9.1 or earlier.
+
+Three faults stood in the way, and every one of them reported success:
+
+**Partition offsets.** Guessed at first. The kernel prints its own table, so
+read it rather than guessing:
+
+```
+0x00000000-0x00020000 : "bootloader"
+0x00020000-0x00080000 : "config"
+0x00080000-0x002a0000 : "kernel"
+0x002a0000-0x006a0000 : "initfs"
+0x006a0000-0x10000000 : "rootfs"
+```
+
+**Zero-filled image.** Erased NAND reads as all ones, and a block is marked bad
+by a zero in its out-of-band marker. A zero-filled image says every block is
+bad:
+
+```
+Bad eraseblock 1 at 0x00020000
+Bad eraseblock 2 at 0x00040000     ... 2048 of them, the entire chip
+```
+
+**The missing 8 MB.** The real cause, and `0xFF` filling alone did not fix it.
+From `hw/block/onenand.c`:
+
+```c
+s->image = memset(g_malloc(size + (size >> 5)), 0xff, size + (size >> 5));
+```
+
+QEMU keeps the out-of-band area **in the same backing file**, appended after
+the main data. A 256 MB OneNAND needs a **264 MB** file. Ours was 256 MB, so
+the OOB region was short, every block still read bad, and the kernel skipped
+the whole chip.
+
+What makes this expensive is the failure mode. JFFS2 mounts a blank partition
+quite happily — an erased chip is a valid empty filesystem — so the mount
+**succeeds**:
+
+```
+VFS: Mounted root (jffs2 filesystem).
+Freeing init memory: 124K
+Kernel panic - not syncing: No init found.
+```
+
+`No init found` sends you looking at the rootfs contents, `init=`, the symlink
+from `/bin/sh` to busybox. The cause is eight megabytes of absent metadata at
+the far end of the file.
+
+With the file at 264 MB and `0xFF`-filled:
+
+```
+Bad eraseblocks: 0
+VFS: Mounted root (jffs2 filesystem).
+
+BusyBox v1.6.1 (2008-09-18 09:43:17 EEST) Built-in shell (ash)
+/ #
+```
+
+### The answer
+
+`mkfs.jffs2` rebuilds the rootfs with `/opt/handshake` inside it, and the test
+script runs as `init`:
+
+```
+Linux version 2.6.21-omap1 (gcc version 3.4.4 (CodeSourcery ARM 2005q3-2))
+
+1. Our openssl starts     OpenSSL 3.5.8
+2. Providers              default: active   legacy: active
+3. Crypto                 SHA-256, rand, RSA-2048 keygen, EC P-256 keygen
+4. stunnel                stunnel 5.80, PTHREAD Sockets:POLL,IPv6
+```
+
+**Linux 2.6.21 serves every syscall OpenSSL 3.5 and stunnel 5.80 make.** That
+was the largest remaining unknown and it did not need the hardware.
+
+The emulator also reproduced the trap in OPEN.md #10 on its own:
+
+```
+clock: Thu Jan  1 00:00:09 UTC 1970
+```
+
+A 1970 clock makes every certificate "not yet valid" and fails TLS in a way
+that reads exactly like a TLS bug. Here it is the emulator having no RTC; on
+an eighteen-year-old tablet it will be the backup battery. Same symptom.
+
+### What the emulator still cannot tell us
+
+`openssl speed` runs, and the numbers came out the way DESIGN.md predicted —
+ChaCha20-Poly1305 about 4x AES-128-GCM. **Do not record that as a measurement.**
+QEMU's TCG retranslates ARM into the host's instruction set and models neither
+the ARM1136 pipeline nor its cache and memory latency, so it distorts the cost
+of an instruction mix, and the ratio between two ciphers is exactly the kind of
+thing it distorts. DECISIONS.md #19 stays a prediction.
+
+Also still hardware-only: the WiFi stack, real flash space and wear, the RTC
+and its battery, and the display. The emulated machine has no network device
+working either — its USB controller does not come up (`Could not start
+tusb6010`), so the TLS handshakes in sections 7 to 9 stay with `qemu-arm`
+user-mode, which has the host's network.
+
+The two tools are `tools/mk-diablo-emulator.sh` and `tools/emulator-smoke.sh`.
+
 ## Result
 
 ```
@@ -480,8 +664,12 @@ stunnel   1. It starts at all        ok   stunnel 5.80, arm-unknown-linux-gnueab
           4. What it negotiated      ok   TLS 1.3, X25519MLKEM768, chain verified
 ```
 
-Not yet proven: that the real 2.6.21 kernel serves every syscall it makes, and
-what any of it costs on a 400 MHz ARM1136. Those need the device.
+Proven on the **real 2.6.21 kernel and the real Diablo userland**, under
+full-system emulation (section 10): openssl and stunnel both start, both
+providers load, and keygen works. The kernel serves every syscall they make.
+
+Still hardware-only: real timings, WiFi, the RTC and its battery, flash space
+and wear, and the display.
 
 ## Summary: the six flags
 

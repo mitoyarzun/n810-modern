@@ -5,8 +5,17 @@ hardware. Ordered. Each step says what to run, what "done" looks like, and what
 to do when it isn't.
 
 **Device status: blocked.** The N810's battery is swollen. Do not charge it.
-Work continues on everything that does not need the tablet, which after
-[BUILDLOG §7](BUILDLOG.md) is more than we thought.
+
+That blocks less than it looks. There are now three test levels below the
+tablet, and the third runs the **real firmware**:
+
+| Level | What it runs on | Answers |
+| --- | --- | --- |
+| `check-artifact.sh` | nothing — static | symbol versions, ABI note, IFUNC, NEEDED |
+| `qemu-smoke.sh` | device's glibc 2.5, host kernel, host network | loading, crypto, real TLS handshakes |
+| `emulator-smoke.sh` | **real 2.6.21 kernel, real 220 MB userland** | whether the kernel serves the syscalls |
+
+See [BUILDLOG §7](BUILDLOG.md) and [§10](BUILDLOG.md).
 
 [OPEN.md](OPEN.md) is the list of unresolved *questions*. This is the list of
 *actions*.
@@ -73,11 +82,38 @@ timings are the build host's, not a 400 MHz ARM1136's. Those stay in step 2.
 
 ---
 
+## Step 1b — Prove it runs on the real kernel (still no device)
+
+```sh
+tools/mk-diablo-emulator.sh    # fetches Nokia's final N810 firmware, ~124 MB
+tools/emulator-smoke.sh        # boots it with our tree inside
+```
+
+Boots the actual `RX-44_DIABLO_5.2008.43-7` firmware under
+`qemu-system-arm -M n810` and runs our binaries on the real 2.6.21 kernel and
+the real Diablo userland.
+
+**Needs QEMU 9.1 or earlier** — the `n810` machine was removed in 9.2. Ubuntu
+24.04 ships 8.2, which works.
+
+**Done when** openssl and stunnel both start, both providers load and keygen
+works, on the real kernel. That is currently the case.
+
+It cannot answer: real timings (QEMU's TCG models no pipeline or cache), WiFi,
+the RTC, flash wear, or the display. The emulated machine has no working
+network either — its USB controller does not come up.
+
+---
+
 ## Step 2 — Prove it runs on the tablet (needs the device)
 
 **Blocked: the battery is swollen and a replacement is on order.** Do not
 charge a swollen lithium cell. Store it away from anything flammable and
 recycle it.
+
+Much of what this step used to be for is now answered. What genuinely remains:
+real-hardware timings for DECISIONS.md #19, WiFi, the clock, free flash, and
+confirming **your** tablet matches the stock firmware.
 
 ```sh
 # on the tablet
@@ -116,13 +152,20 @@ several decisions in DECISIONS.md are currently resting on as predictions.
 
 ### Before that session, prepare the first-contact kit
 
-The tablet is stock: no `rootsh`, no `openssh`, no way in but the on-screen
-keyboard. Assemble a folder to copy over USB mass storage — `rootsh` and `ssh`
-`.deb` files from the mirrors, the artefact tarball, and the smoke test — so
-the first charged hour is spent testing, not typing.
+The tablet is stock, and the firmware confirms just how stock: **no `openssh`,
+no `rootsh`, and also no `openssl` CLI, no `wget`, no `curl` and no Python** —
+only the `libssl0.9.8` library. There is no way in but the on-screen keyboard
+until something is installed.
+
+Assemble a folder to copy over USB mass storage — `rootsh` and `ssh` `.deb`
+files from the mirrors, the artefact tarball, and the smoke test — so the first
+charged hour is spent testing, not typing.
 
 The Diablo pool has what is needed:
 `pool/maemo4.1.2/free/o/openssh/ssh_3.8p1-3osso7.2_armel.deb`.
+
+Better: the emulator can rehearse this. The `.deb` files can be installed into
+the extracted rootfs and the whole flow tested before the battery arrives.
 
 ---
 

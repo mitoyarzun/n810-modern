@@ -19,7 +19,9 @@ generates keys, and completes a TLS 1.3 handshake to example.org with
 `Verification: OK`. stunnel 5.80 builds on top of it and turns a plain-HTTP
 client into a verified TLS 1.3 connection, which is modern TLS for stock
 applications that will never be rebuilt.
-Nothing has yet run on hardware; the tablet's battery is swollen and is being
+Both run on the **real Diablo firmware** — Nokia's final N810 release, its
+actual 2.6.21 kernel and 220 MB userland — under full-system QEMU. Nothing has
+yet run on physical hardware; the tablet's battery is swollen and is being
 replaced.**
 
 ## What works today
@@ -34,6 +36,8 @@ tools/build-stunnel.sh       # stunnel 5.80, linked against the above
 tools/check-artifact.sh FILE # static checks: will this binary run on the device
 tools/qemu-smoke.sh          # actually run it, on the device's own glibc 2.5
 tools/qemu-stunnel-test.sh   # plain HTTP in, verified TLS 1.3 out
+tools/mk-diablo-emulator.sh  # fetch and unpack Nokia's real N810 firmware
+tools/emulator-smoke.sh      # boot it: real 2.6.21 kernel, real userland
 tools/device-smoke-test.sh   # run this ON the tablet
 tools/build-in-docker.sh     # all of the above, on any host with Docker
 ```
@@ -42,11 +46,18 @@ End to end that is about fifteen minutes on four cores, and it produces 5.3 MB
 of verified armv6 runtime: `libcrypto.so.3`, `libssl.so.3`, the `openssl` CLI
 and the legacy provider.
 
-`qemu-smoke.sh` is the one to run. `check-artifact.sh` inspects binaries and can
-only test for failures someone already met; two builds passed it and could not
-have started on the device. QEMU runs them against the sysroot's real
-`ld-linux.so.3`, which is glibc 2.5 — so the loader deciding whether they work
-is the device's. See [BUILDLOG §7](BUILDLOG.md).
+There are three test levels below the tablet, and each catches what the one
+above it cannot:
+
+| | Runs on | Catches |
+| --- | --- | --- |
+| `check-artifact.sh` | nothing — static | symbol versions, ABI note, IFUNC, NEEDED |
+| `qemu-smoke.sh` | the device's glibc 2.5, host kernel and network | loading, crypto, real TLS handshakes |
+| `emulator-smoke.sh` | **the real 2.6.21 kernel and 220 MB userland** | whether the kernel serves the syscalls |
+
+The static checker only tests for failures someone already met — two builds
+passed it and could not have started on the device. See [BUILDLOG §7](BUILDLOG.md)
+and [§10](BUILDLOG.md).
 
 The environment is the real deliverable. Once it exists, every later package —
 `stunnel`, `wget`, `curl`, `git`, NetSurf — is an afternoon rather than a

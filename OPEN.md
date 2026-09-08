@@ -6,24 +6,27 @@ hand. Session of 2026-09-08, revised the same day.
 **The device is blocked:** its battery is swollen and a replacement is on order.
 Do not charge it.
 
-**QEMU moved the line.** `tools/qemu-smoke.sh` runs our armel binaries against
-the device's own glibc 2.5 loader, so several questions below no longer need
-hardware. Item 2 is answered. See [BUILDLOG §7](BUILDLOG.md).
+**QEMU moved the line, twice.** `tools/qemu-smoke.sh` runs our binaries against
+the device's own glibc 2.5 loader (BUILDLOG §7). Then `tools/emulator-smoke.sh`
+went further and boots the **real Diablo firmware** — the actual 2.6.21 kernel
+and the actual 220 MB userland, from Nokia's final N810 release — under
+full-system QEMU (BUILDLOG §10). Items 1, 2, 4 and 9 are answered, and 10 has
+been reproduced. What is left below genuinely needs the hardware.
 
 ## Needs the device (first session with hardware)
 
-1. **Confirm the installed versions.** Everything in [RESEARCH.md](RESEARCH.md)
-   comes from the Diablo package index, not from your actual tablet, which may
-   have been updated or have extras installed. Run and record:
-   ```sh
-   dpkg -l | grep -iE 'ssl|gnutls|nss|libc6|zlib'
-   uname -a
-   openssl version -a
-   cat /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null
-   ```
-   In particular: is it really `0.9.8e`, and is the kernel really `2.6.21`? The
-   whole `check-artifact.sh` threshold (`GLIBC_2.4`, ABI note ≤ 2.6.21) is
-   derived from these.
+1. ~~**Confirm the installed versions.**~~ **Answered from the firmware
+   itself**, not the package index: glibc 2.5, `libc6 2.5.0-1osso10`,
+   `zlib1g 1:1.2.3-9.osso8`, `libssl0.9.8 0.9.8e-9maemo3`,
+   `libcurl3 7.15.5-1osso4`, `Linux version 2.6.21-omap1`, 622 packages. Both
+   sysroot pins are exactly right and the `check-artifact.sh` thresholds hold.
+   See BUILDLOG §10.
+
+   Still worth running on **your** tablet, which may have been updated or have
+   extras installed — but the baseline is no longer a guess.
+
+   One thing the index could not have shown: a stock device has **no `openssl`
+   CLI, no `wget`, no `curl` and no Python**, only `libssl0.9.8`.
 
 2. **Does anything built here actually run?** — **answered, under QEMU.** It
    starts, both providers load, RSA and EC keygen work, and it completes a real
@@ -40,9 +43,10 @@ hardware. Item 2 is answered. See [BUILDLOG §7](BUILDLOG.md).
    what the rootfs and the 2 GB internal flash actually have, and decide where
    `/opt/handshake` really lives.
 
-4. **Does `/dev/urandom` behave?** Seeding is configured to use it exclusively.
-   Confirm it exists, is readable, and is not starved early in boot. QEMU
-   passes the host's through, so it proves only that the code path works.
+4. ~~**Does `/dev/urandom` behave?**~~ **Present and readable** on the real
+   firmware under emulation, and `openssl rand` works on the 2.6.21 kernel.
+   Not yet shown: that it is not starved early in boot on real hardware, which
+   is a timing property an emulator cannot reproduce.
 
 5. **Benchmark, do not guess.** `openssl speed chacha20-poly1305 aes-128-gcm
    sha256` and `openssl s_time`. The ChaCha20-over-AES preference in
@@ -80,11 +84,12 @@ hardware. Item 2 is answered. See [BUILDLOG §7](BUILDLOG.md).
    and our OpenSSL — all stock. Proven under QEMU to wrap a plain-HTTP client
    into a verified TLS 1.3 connection. See BUILDLOG §9.
 
-10. **Certificate validation needs a correct clock.** The N810's RTC depends on
-    the backup battery, which on an 18-year-old device may well be dead. If the
-    clock resets to 1970 on every boot, every certificate is "not yet valid" and
-    TLS fails in a way that looks like a TLS bug. Needs an NTP story — and NTP
-    over plain UDP still works fine, so this is solvable, just easy to miss.
+10. **Certificate validation needs a correct clock.** Still open, and now
+    **reproduced**: the emulator boots to `Thu Jan  1 00:00:09 UTC 1970`. It
+    does that for its own reasons (no RTC), but the symptom is identical to a
+    dead backup battery, which an 18-year-old device will likely have. Every
+    certificate reads "not yet valid" and TLS fails looking exactly like a TLS
+    bug. Needs an NTP story — plain UDP, so it works without any of this.
 
 11. **`libcurl3` is 7.15.5 and links the old OpenSSL.** Rebuilding curl means
     either a parallel install under `/opt/handshake` (safe, but stock apps keep
