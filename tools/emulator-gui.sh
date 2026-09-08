@@ -28,6 +28,17 @@ DISPLAY_N=$((PORT - 5900))
 # publish rule, and the result is the same: reachable only through the tunnel.
 BIND="${VNC_BIND:-127.0.0.1}"
 
+# A password is not optional in practice: macOS Screen Sharing refuses to
+# connect to a VNC server that offers no authentication, and it is the client
+# most people already have. Classic VNC auth is DES-based and caps the
+# password at 8 characters, so this is a speed bump, not security -- the
+# loopback binding and the SSH tunnel are what actually protect it.
+#
+# Passed by FILE, not `data=`, so it never appears in the process list.
+PASS="${VNC_PASSWORD:-$(head -c 16 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | cut -c1-8)}"
+PASSFILE="$WORK/.vncpass"
+( umask 077; printf '%s' "$PASS" > "$PASSFILE" )
+
 cd "$WORK"
 K=$(ls unpacked/kernel_* | head -1)
 [ -f flash-gui.img ] || { echo "no flash-gui.img -- run tools/emulator-gui-build.sh"; exit 1; }
@@ -38,7 +49,10 @@ qemu-system-arm -M help | grep -q '^n810' || {
 cat <<INFO
 ==> Diablo on the N810, over VNC
 
-    listening    $BIND:$PORT   (no password -- keep it off the network)
+    listening    $BIND:$PORT
+    password     $PASS
+                 (VNC auth caps at 8 characters, so it is a speed bump.
+                  The loopback binding and the tunnel are the real control.)
     tunnel       ssh -N -L $PORT:127.0.0.1:$PORT $(hostname)
     then open    vnc://127.0.0.1:$PORT
 
@@ -59,6 +73,7 @@ exec qemu-system-arm -M n810 -m 128 \
   -drive file=flash-gui.img,format=raw,if=mtd \
   -append "console=ttyS0,115200n8 root=/dev/mtdblock3 rootfstype=jffs2 rw init=/linuxrc" \
   -serial file:"$WORK/gui-serial.log" \
-  -vnc "$BIND:$DISPLAY_N" \
+  -object "secret,id=vncsec,file=$PASSFILE" \
+  -vnc "$BIND:$DISPLAY_N,password-secret=vncsec" \
   -monitor "unix:$WORK/monitor.sock,server,nowait" \
   -no-reboot
