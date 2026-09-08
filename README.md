@@ -44,9 +44,20 @@ tools/device-smoke-test.sh   # run this ON the tablet
 tools/build-in-docker.sh     # all of the above, on any host with Docker
 ```
 
-End to end that is about fifteen minutes on four cores, and it produces 5.3 MB
-of verified armv6 runtime: `libcrypto.so.3`, `libssl.so.3`, the `openssl` CLI
-and the legacy provider.
+End to end that produces 5.3 MB of verified armv6 runtime: `libcrypto.so.3`,
+`libssl.so.3`, the `openssl` CLI and the legacy provider.
+
+Measured, from a clean tree, including both QEMU test suites:
+
+| Host | Time |
+| --- | --- |
+| Apple M4, native arm64 container | **2m 03s** |
+| x86-64, 4 cores, Debian 13 | ~15m |
+
+The gap is real: `gcc-arm-linux-gnueabi` is packaged for arm64 as well as
+amd64, so Apple Silicon cross-compiles natively rather than through x86
+emulation. `tools/build-in-docker.sh` runs native by default; set
+`PLATFORM=linux/amd64` only if you need to match a specific build host.
 
 There are three test levels below the tablet, and each catches what the one
 above it cannot:

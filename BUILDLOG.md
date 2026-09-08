@@ -728,6 +728,77 @@ DSP loop — both came from a log that was deliberately captured, and each took
 one read. Everything else was theorising from the console, and produced three
 consecutive wrong diagnoses.
 
+## 12. The build only worked on one machine
+
+Everything above was developed on a single x86-64 Debian host. The first time
+anyone ran it elsewhere — an Apple M4, native arm64, Docker via colima — it
+died twenty-five seconds in, on the very first package:
+
+```
+tar: ./usr/share/zoneinfo/localtime: Cannot open: Permission denied
+tar: Exiting with failure status due to previous errors
+dpkg-deb: error: tar subprocess returned error exit status 2
+```
+
+The message names a symlink, so that is where the investigation starts and
+where it wastes its time. Creating that exact symlink at that exact path on
+the same mount works. So does every other kind:
+
+```
+relative symlink                OK
+absolute symlink inside share   OK
+absolute symlink outside share  OK
+```
+
+The archive is the answer, not the path it named:
+
+```
+hrw-r--r-- ./usr/share/zoneinfo/Etc/GMT-0     link to ./usr/share/zoneinfo/Etc/Greenwich
+hrw-r--r-- ./usr/share/zoneinfo/Etc/Universal link to ./usr/share/zoneinfo/Etc/UTC
+```
+
+Diablo's `libc6` ships **hardlinked** zone files. Unpacking them onto a macOS
+bind mount fails, and `--no-same-owner --no-same-permissions` changes nothing —
+the host filesystem is refusing, not the extraction. Extracting the same
+package to a container-local path succeeds every time.
+
+### The fix is not a workaround
+
+`tools/build-in-docker.sh` now keeps the build tree in a **Docker volume**
+instead of a bind mount. Only the finished artefacts cross back, into `dist/`.
+
+That is better engineering independent of the bug. The sysroot, the OpenSSL
+tree and the flash images are all build intermediates that no host tool needs
+to see; putting them on a shared filesystem bought nothing and cost both
+correctness and speed. Any host filesystem's semantics — virtiofs, 9p, sshfs,
+whatever Windows does — are now irrelevant.
+
+### And the timing claim was wrong
+
+The README said "about fifteen minutes on four cores", measured on the Debian
+host. From a clean tree, including both QEMU suites:
+
+| Host | Time |
+| --- | --- |
+| Apple M4, native arm64 container | **2m 03s** |
+| x86-64, 4 cores, Debian 13 | ~15m |
+
+`gcc-arm-linux-gnueabi` is packaged for arm64 as well as amd64, so Apple
+Silicon cross-compiles natively instead of through x86 emulation. The build
+script had `--platform linux/amd64` hardcoded, which would have forced every
+arm64 user into emulation for no reason. It now runs native by default.
+
+### The lesson, which is the same one again
+
+Section 3 observed that four of the six required compiler flags exist because
+the **host** is modern, not because the target is old. This is that lesson one
+level up: the build *environment* needs the same defensive treatment as the
+toolchain, and the only way to find out is to run it somewhere else.
+
+Had this been published first, the README's opening command would have failed
+for every macOS reader inside ninety seconds, with an error pointing at a
+symlink that is not the problem.
+
 ## Result
 
 ```
