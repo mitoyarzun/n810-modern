@@ -1,7 +1,12 @@
 # Next
 
-Written 2026-09-08, at the end of the Tier 1 prep session. Ordered. Each step
-says what to run, what "done" looks like, and what to do when it isn't.
+Written 2026-09-08. Revised the same day, after QEMU changed which steps need
+hardware. Ordered. Each step says what to run, what "done" looks like, and what
+to do when it isn't.
+
+**Device status: blocked.** The N810's battery is swollen. Do not charge it.
+Work continues on everything that does not need the tablet, which after
+[BUILDLOG §7](BUILDLOG.md) is more than we thought.
 
 [OPEN.md](OPEN.md) is the list of unresolved *questions*. This is the list of
 *actions*.
@@ -25,6 +30,13 @@ tools/mk-sysroot.sh          # 27 MB Diablo sysroot from the mirrors
 tools/build-openssl.sh       # OpenSSL 3.5.8 -> ./out
 ```
 
+On a host with Docker and nothing else, one command does all three plus the
+QEMU test:
+
+```sh
+tools/build-in-docker.sh
+```
+
 …or unpack the tarball from the session, which is the same tree, already
 verified: `handshake-openssl-3.5.8-diablo-armel.tar.gz`.
 
@@ -33,9 +45,39 @@ tablet. The artefacts are 5.3 MB.
 
 ---
 
-## Step 1 — Prove it runs (needs the device)
+## Step 1 — Prove it runs under QEMU (no device needed)
 
-Everything downstream is blocked on this, and it is one command.
+This used to be step 1 *with* the device. It is not, and assuming it was cost
+us a shipped build that could never have started. See [BUILDLOG §7](BUILDLOG.md).
+
+```sh
+tools/qemu-smoke.sh
+```
+
+It runs our armel binaries under `qemu-arm -L sysroot-diablo`, so the loader
+resolving the symbols is the device's own glibc 2.5. That catches every class
+of failure that lives between "the linker was happy" and "the process starts":
+IFUNC symbols, missing libraries, bad relocations, providers that will not
+load.
+
+**Done when** all five sections pass, including a real TLS 1.3 handshake to
+`example.org` over the build host's network.
+
+**Run it on every build, before packaging.** `tools/build-in-docker.sh` does.
+
+### What QEMU does not answer
+
+`qemu-arm` translates syscalls to the host kernel. It does not refuse what
+2.6.21 lacked. So it cannot tell you the real kernel serves every call, and its
+timings are the build host's, not a 400 MHz ARM1136's. Those stay in step 2.
+
+---
+
+## Step 2 — Prove it runs on the tablet (needs the device)
+
+**Blocked: the battery is swollen and a replacement is on order.** Do not
+charge a swollen lithium cell. Store it away from anything flammable and
+recycle it.
 
 ```sh
 # on the tablet
@@ -53,7 +95,7 @@ BUILDLOG §2.
 **If it dies with `cannot open shared object file`** — something needs a library
 Diablo lacks and we did not ship. Name it, add it to the baseline or the bundle
 in `tools/check-artifact.sh`, and work out why the checker passed it (that is a
-checker bug, not a build bug — see BUILDLOG §6).
+checker bug, not a build bug — see BUILDLOG §6 and §7).
 
 **Whatever happens, paste the whole log into BUILDLOG.md.** Sections 0 and 6 of
 the smoke test capture the stock package versions and the speed numbers, which
@@ -72,30 +114,47 @@ several decisions in DECISIONS.md are currently resting on as predictions.
   on this core. That is a well-founded prediction, not a measurement. If it is
   wrong, change the cipher preference and say so in DECISIONS.md #19.
 
+### Before that session, prepare the first-contact kit
+
+The tablet is stock: no `rootsh`, no `openssh`, no way in but the on-screen
+keyboard. Assemble a folder to copy over USB mass storage — `rootsh` and `ssh`
+`.deb` files from the mirrors, the artefact tarball, and the smoke test — so
+the first charged hour is spent testing, not typing.
+
+The Diablo pool has what is needed:
+`pool/maemo4.1.2/free/o/openssh/ssh_3.8p1-3osso7.2_armel.deb`.
+
 ---
 
-## Step 2 — Certificates
-
-Without a current trust store the new library still fails, just later and more
-confusingly.
+## Step 3 — Certificates — **done**
 
 ```sh
-# on the build host
-curl -O https://curl.se/ca/cacert.pem
-# on the tablet
-cp cacert.pem /opt/handshake/ssl/cert.pem
-/opt/handshake/bin/openssl s_client -connect example.org:443 -servername example.org
+tools/mk-truststore.sh
 ```
 
-**Done when** `s_client` reports `Verify return code: 0 (ok)` rather than
-`unable to get local issuer certificate`.
+Mozilla's store, as curl publishes it, checksum-verified, installed to
+`/opt/handshake/ssl/cert.pem` — which is the `OPENSSLDIR` compiled into the
+library, so nothing needs configuring on the device.
 
-Decision still open (OPEN.md #6): full Mozilla store vs. a trimmed one. Default
-to the full store; only trim with a reason.
+Confirmed by `tools/qemu-smoke.sh` section 4:
+
+```
+4. A real TLS 1.3 handshake, over this host's network
+   trust store: out/opt/handshake/ssl/cert.pem
+   ok    TLS 1.3 to example.org
+         Ciphersuite: TLS_AES_256_GCM_SHA384
+         Verification: OK
+```
+
+OPEN.md #6 (full store vs. trimmed) is settled in favour of the full store.
+See DECISIONS.md #25.
+
+`tools/build-in-docker.sh` runs this before the smoke test, so the tarball
+ships with a current trust store.
 
 ---
 
-## Step 3 — stunnel
+## Step 4 — stunnel
 
 The highest-leverage consumer, and the reason it comes before `wget`: it
 retroactively gives modern TLS to *every* stock app that can be pointed at
@@ -108,6 +167,11 @@ second machine.
             --with-ssl=$PWD/out/opt/handshake
 ```
 
+`libcrypto.pc` is scrubbed of `-latomic` at build time, so stunnel will not
+inherit the dependency that BUILDLOG §7 is about. Check its `NEEDED` list
+anyway, and put the result through `tools/qemu-smoke.sh` — the point of that
+tool is that a consumer can be proven to load before the tablet exists.
+
 Unknown: whether stunnel needs anything Diablo lacks (OPEN.md #9). Check before
 committing to it. Write `tools/build-stunnel.sh` in the same shape as
 `build-openssl.sh`, and run everything through `check-artifact.sh`.
@@ -117,7 +181,7 @@ TLS 1.3 site.
 
 ---
 
-## Step 4 — wget, then curl and git
+## Step 5 — wget, then curl and git
 
 `wget` first: smallest, most obviously useful, proves the pattern for
 everything after it.
@@ -131,7 +195,7 @@ install is insufficient. DECISIONS.md #2 says coexist, never replace.
 
 ---
 
-## Step 5 — Python's `_ssl`
+## Step 6 — Python's `_ssl`
 
 Rebuild only the extension module against the new library, leaving the
 interpreter alone (OPEN.md #8). This is the smallest change that makes the
@@ -140,7 +204,7 @@ tablet becomes useful for the thing you actually wanted it for.
 
 ---
 
-## Step 6 — Distribution
+## Step 7 — Distribution
 
 Only worth doing once several packages exist. Shape is in DESIGN.md §4: a
 static apt repo over **plain HTTP** with signed packages, because you cannot
@@ -169,7 +233,11 @@ Read in this order: [README.md](README.md) for what and why,
 [BUILDLOG.md](BUILDLOG.md) for the five flags and why each exists, then this
 file. `DESIGN.md` and `DECISIONS.md` are reference, not narrative.
 
-The one thing worth re-reading before touching the toolchain: four of the five
+The one thing worth re-reading before touching the toolchain: four of the six
 required compiler flags exist because the *host* is modern, not because the
 target is old. Any new build that skips `tools/env.sh` will rediscover all of
 them.
+
+The second thing: run `tools/qemu-smoke.sh`. Two builds in a row passed
+`check-artifact.sh` and could not have started on the device. A static checker
+only knows the failures someone already met.

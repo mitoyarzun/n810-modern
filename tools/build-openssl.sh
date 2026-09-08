@@ -37,11 +37,25 @@ echo "==> Configuring"
 # no-async                    : glibc 2.5/arm has no getcontext/setcontext/makecontext,
 #                               so OpenSSL's fibre-based ASYNC could never work.
 # no-tests / no-docs          : we cannot run tests here, and docs need extra perl.
+#
+# -DBROKEN_CLANG_ATOMICS is the load-bearing one, and its name is misleading:
+# there is no clang here. It is OpenSSL's supported switch to turn off the
+# __atomic_* builtins in crypto/threads_pthread.c -- the only file that uses
+# them -- and fall back to mutexes. Without it, GCC emits calls to 64-bit
+# atomics that ARMv6 cannot do inline, which pulls in libatomic.so.1. Every
+# 64-bit entry point in GCC's libatomic is an IFUNC, and glibc 2.5 predates
+# IFUNC, so the device's loader cannot resolve a single one of them:
+#     relocation error: libcrypto.so.3: symbol __atomic_fetch_add_8,
+#     version LIBATOMIC_1.0 not defined in file libatomic.so.1
+# Bundling libatomic does not help and neither does libatomic.a, which is
+# IFUNC-based too. Mutex fallbacks cost nothing measurable on one 400 MHz
+# core. See BUILDLOG.md and tools/qemu-smoke.sh, which is how this was found.
 ./Configure linux-armv4 \
   --prefix=/opt/handshake \
   --openssldir=/opt/handshake/ssl \
   --with-rand-seed=devrandom \
   --libdir=lib \
+  -DBROKEN_CLANG_ATOMICS \
   shared threads no-tests no-docs no-afalgeng no-async
 
 echo "==> Building (-j$JOBS)"
@@ -50,17 +64,42 @@ make -j"$JOBS"
 echo "==> Staging into $OUT"
 rm -rf "$OUT" && make DESTDIR="$OUT" install_sw install_ssldirs
 
-# GCC 4.7+ emits calls into libatomic for 64-bit atomics on ARMv6, which has no
-# 64-bit atomic instructions. Diablo's newest compiler is GCC 4.2, so it has no
-# libatomic at all -- it is absent from every Diablo package index. Ship the
-# toolchain's, which we verify needs nothing newer than GLIBC_2.4.
-if "$STRIP" --version >/dev/null 2>&1 &&
-   $TARGET-readelf -d "$OUT/opt/handshake/lib/libcrypto.so.3" | grep -q 'libatomic\.so\.1'; then
-  echo "==> Bundling libatomic.so.1 (absent from Diablo)"
-  src=$($TARGET-gcc -print-file-name=libatomic.so.1)
-  [ -e "$src" ] || { echo "    cannot find libatomic.so.1"; exit 1; }
-  cp -L "$src" "$OUT/opt/handshake/lib/libatomic.so.1"
+# libatomic must not appear. It used to be bundled here; that was wrong. Its
+# 64-bit atomics are all IFUNCs and glibc 2.5 cannot resolve IFUNC symbols, so
+# a build that still needs libatomic is a build that cannot start on the
+# device. -DBROKEN_CLANG_ATOMICS above is what keeps it away. If this fires,
+# something re-enabled the __atomic_* builtins -- fix that, do not ship a copy.
+# Captured, not piped: `set -o pipefail` with `grep -q` reports SIGPIPE (141)
+# on a match, so a piped test here would never fire. See check-artifact.sh.
+libcrypto_needed=$($TARGET-readelf -d "$OUT/opt/handshake/lib/libcrypto.so.3" 2>/dev/null || true)
+if grep -q 'libatomic\.so\.1' <<<"$libcrypto_needed"; then
+  echo "FAIL: libcrypto still needs libatomic.so.1."
+  echo "      glibc 2.5 cannot resolve its IFUNC symbols. See the Configure"
+  echo "      comment above and BUILDLOG.md."
+  exit 1
 fi
+
+# OpenSSL still records -latomic in its installed metadata even though
+# -DBROKEN_CLANG_ATOMICS means the library does not reference it. Left alone,
+# the next package to link against us picks it up from pkg-config:
+#     libcrypto.pc:  Libs.private: -ldl -pthread -latomic
+# and re-acquires the exact DT_NEEDED that could not load on the device (§7).
+# Autotools of Diablo's era do not pass --as-needed, so it would stick. Scrub
+# it from the metadata, then prove it is gone.
+echo "==> Scrubbing -latomic from installed metadata"
+mapfile -t metadata < <(find "$OUT" \( -name '*.pc' -o -name '*.cmake' \) -type f)
+for m in "${metadata[@]}"; do
+  sed -i 's/ -latomic//g' "$m"
+done
+# Scoped to the metadata files on purpose: a blanket grep over $OUT would also
+# read the stripped binaries and could fail the build on an incidental match.
+left=$(grep -l 'latomic' "${metadata[@]}" 2>/dev/null || true)
+if [ -n "$left" ]; then
+  echo "FAIL: -latomic still referenced in:"
+  printf '      %s\n' $left
+  exit 1
+fi
+echo "    ${#metadata[@]} metadata files clean"
 
 echo "==> Stripping"
 find "$OUT" -type f \( -name '*.so*' -o -perm -u+x \) -print0 |

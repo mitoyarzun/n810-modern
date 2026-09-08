@@ -18,6 +18,15 @@ for f in "$@"; do
   echo "== $f"
   bad=0
 
+  # Capture readelf's output rather than piping it into grep. `set -o pipefail`
+  # plus `grep -q` is a trap: grep exits at the first match, the producer dies
+  # of SIGPIPE, and the pipeline reports 141. Both "match" and "no match" are
+  # then non-zero, so the `if` always takes the else branch and the check can
+  # never fire. It only shows up when the output exceeds the pipe buffer, which
+  # is why the short `readelf -h` checks worked and the symbol-table ones did
+  # not. Check 4 was silently vacuous from the day it was written.
+  dynsyms=$($T-readelf --dyn-syms -W "$f" 2>/dev/null || true)
+
   # 1. Right machine and ABI.
   hdr=$($T-readelf -h "$f" 2>/dev/null) || { echo "   NOT AN ELF FILE"; rc=1; continue; }
   grep -q 'Machine:.*ARM' <<<"$hdr" || { echo "   FAIL  not an ARM binary"; bad=1; }
@@ -25,7 +34,7 @@ for f in "$@"; do
   # 2. The kernel ABI note. The host toolchain's crt1.o stamps 3.2.0, which the
   #    device's 2.6.21 loader rejects outright with "FATAL: kernel too old".
   #    Shared libraries carry no note; that is expected, not a failure.
-  if $T-readelf -h "$f" | grep -q 'Type:.*EXEC\|Type:.*DYN.*'; then
+  if grep -qE 'Type:.*(EXEC|DYN)' <<<"$hdr"; then
     note=$($T-readelf -n "$f" 2>/dev/null | grep -oE 'ABI: [0-9.]+' | head -1 | cut -d' ' -f2)
     if [ -n "$note" ]; then
       if ver_gt "$note" "2.6.21"; then
@@ -51,13 +60,26 @@ for f in "$@"; do
 
   # 4. The 64-bit time_t transition symbols do not exist in glibc 2.5. Their
   #    presence means host headers leaked into the compile (see env.sh).
-  if $T-readelf --dyn-syms -W "$f" 2>/dev/null | grep -qE '_time64|_TIME_BITS'; then
+  if grep -qE '_time64|_TIME_BITS' <<<"$dynsyms"; then
     echo "   FAIL  references *_time64 symbols -- host glibc headers leaked in"; bad=1
   else
     echo "   ok    no 64-bit time_t symbols"
   fi
 
-  # 5. Interpreter must be the armel one. armhf would be ld-linux-armhf.so.3.
+  # 5. No IFUNC symbols, defined or referenced. GNU indirect functions arrived
+  #    in glibc 2.11 (2009) and on arm later still; glibc 2.5 has no idea what
+  #    symbol type 10 is, so its loader reports the symbol as undefined:
+  #        symbol __atomic_fetch_add_8, version LIBATOMIC_1.0 not defined
+  #    This is how GCC's libatomic.so.1 got through check 6 -- it shipped with
+  #    us, it was present, and not one of its 64-bit atomics could be resolved.
+  #    libatomic.a is IFUNC-based too, so static linking does not escape it.
+  if grep -q ' IFUNC ' <<<"$dynsyms"; then
+    echo "   FAIL  exports or imports IFUNC symbols; glibc 2.5 cannot resolve them"; bad=1
+  else
+    echo "   ok    no IFUNC symbols"
+  fi
+
+  # 6. Interpreter must be the armel one. armhf would be ld-linux-armhf.so.3.
   interp=$($T-readelf -l "$f" 2>/dev/null | grep -oE '/lib/ld-linux[^]]*\.so\.[0-9]+' | head -1)
   if [ -n "$interp" ]; then
     if [ "$interp" = "/lib/ld-linux.so.3" ]; then
@@ -67,7 +89,7 @@ for f in "$@"; do
     fi
   fi
 
-  # 6. Every NEEDED library must either exist on a stock Diablo device or
+  # 7. Every NEEDED library must either exist on a stock Diablo device or
   #    travel with us. This is the check that catches libatomic.so.1: GCC 4.7+
   #    emits calls to it for 64-bit atomics on ARMv6, and Diablo -- whose
   #    newest compiler is GCC 4.2 -- has never heard of it. The build succeeds,
