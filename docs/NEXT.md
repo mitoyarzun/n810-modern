@@ -281,7 +281,7 @@ renaming a published package is worse than choosing badly once.
 
 ## If you come back to this cold
 
-Read in this order: [README.md](README.md) for what and why,
+Read in this order: [README.md](../README.md) for what and why,
 [BUILDLOG.md](BUILDLOG.md) for the five flags and why each exists, then this
 file. `DESIGN.md` and `DECISIONS.md` are reference, not narrative.
 
