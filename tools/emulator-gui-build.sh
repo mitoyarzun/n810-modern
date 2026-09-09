@@ -151,13 +151,20 @@ echo "==> 7. Creating the gconf directory ke-recv expects"
 mkdir -p rootfs/var/lib/gconf/system/osso
 chmod 0755 rootfs/var/lib/gconf/system rootfs/var/lib/gconf/system/osso
 
-echo "==> 8. Removing the contacts button from the task navigator"
+echo "==> 8. The contacts button in the task navigator"
 # The left-hand task navigator loads its buttons from tasknavigator.conf. The
 # contacts plugin needs telephony and address-book backends the emulator does
 # not have, so the button does nothing but occupy the bar and load a library.
 # Drop it; the browser, applications menu and task switcher stay.
+#
+# KEEP_CONTACTS=1 keeps the button, for a screenshot of the stock bar or to
+# test the plugin itself. The default removes it. The edit is on the extracted
+# rootfs, so a previous run has already deleted the line: to get the button
+# back, extract the firmware again with tools/mk-diablo-emulator.sh.
 NAV=rootfs/etc/hildon-desktop/tasknavigator.conf
-if [ -f "$NAV" ] && grep -q "osso-contact-plugin" "$NAV"; then
+if [ "${KEEP_CONTACTS:-0}" = "1" ]; then
+  echo "    kept (KEEP_CONTACTS=1)"
+elif [ -f "$NAV" ] && grep -q "osso-contact-plugin" "$NAV"; then
   sed -i '/osso-contact-plugin\.desktop/d' "$NAV"
   echo "    contacts plugin removed"
 fi

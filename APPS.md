@@ -25,8 +25,8 @@ already solved in hardware:
 
 | | |
 | --- | --- |
-| `libgsthantrocodec.so` | **hardware video decode** |
-| `libgstdspg711/g729/ilbc/amr/mp3/aac` | **DSP audio codecs** |
+| `libgsthantrocodec.so` | MPEG-4/H.263 codecs **in software, on the ARM** — see below |
+| `libgstdspg711/g729/ilbc/amr/mp3/aac` | **DSP audio codecs** — a real TMS320C55x |
 | `libsofia-sip-ua`, `telepathy-sofiasip` | a complete **SIP stack** |
 | `osso-voip-ui`, `osso-accounts-plugin-sip` | SIP account UI and calling UI |
 | `farsight`, `telepathy-stream-engine` | media/call framework |
@@ -325,6 +325,83 @@ The two strategies pull against each other, and that is the real decision:
 
 This repository takes the first path (DECISIONS #1). The second is a real
 option, not a fantasy, and someone should try it. It is a different project.
+
+## The DSP, and why it is the wrong thing to reverse engineer
+
+### First, a correction
+
+An earlier version of this file called `libgsthantrocodec.so` "hardware video
+decode". **That is wrong.** The library reports itself as `HantroSwMpeg4v3.4`
+-- *Sw*. It has no `ioctl`, no `dlopen`, no device node, no firmware file, and
+there is no Hantro kernel driver anywhere in the firmware. It is Hantro's
+software MPEG-4/H.263 codec, running on the ARM.
+
+**This device has no hardware video decode.** That is why its own SIP profile
+offers H.263 at QCIF, 176x144.
+
+### What the DSP is
+
+Audio only. `/lib/dsp/modules` holds one task per codec: `g711`, `g729`,
+`ilbc`, `amrnb`, `amrwb`, `mp2`, `mp3`, `aac`, `aep`.
+
+The core is a **TI TMS320C55x**: COFF magic `0x00c2`, and the runtime is built
+from `c55_c.s55` with `_C55_INTC_*` symbols.
+
+### The interface is not a black box
+
+This is the good news. The ARM talks to the DSP through **Nokia's DSP
+Gateway**: `/dev/dsptask/<name>`, `/dev/dspctl/ctl`, `/dev/dspctl/mem`, with a
+version handshake in `/sys/devices/platform/dsp.0/ifver`.
+
+The task ABI is small and legible. Symbols in an 8 KB task object:
+
+```
+.text:create  .text:init  .text:delete  .text:exit     <- lifecycle
+_bksnd  _ipbuf_d                                       <- buffer transfer
+```
+
+The `.cmd` linker files are plain text and ship on the device:
+
+```
+SECTIONS {
+	g711_enc_mmap_buffer: align=0x10000 {}	> EXTMEM4
+	g711_enc_eap_bufs: align=0x04 {}	> EXTMEM4
+}
+```
+
+So the protocol needs little reverse engineering. The parts that are closed
+are the task objects (~8-13 KB each) and `avs_kernel.out` (962 KB).
+
+### Why reverse engineering it is still the wrong target
+
+**1. The blocker is the toolchain, not the secrets.** No GCC or LLVM backend
+for C55x exists; TI's `cl55` is proprietary. You could understand every task
+perfectly and still not be able to build a replacement. Writing a C55x backend
+is a multi-year project *before* any DSP code gets written.
+
+**2. The payoff is battery life, not capability.** Every codec the DSP
+provides already has a mature open implementation that runs on ARM: G.711 is a
+table lookup, and there are bcg729, libilbc, opencore-amr, libmad and faad2 for
+the rest. One audio stream fits comfortably in 400 MHz. The DSP does it at a
+fraction of the power, which matters on a handheld -- but it unlocks nothing.
+
+### The cheaper target, which nobody has taken
+
+**You do not need to replace the blobs.** They run on the DSP. They do not
+care which kernel the ARM runs. What is missing on a modern kernel is the
+*ARM-side driver* -- and that is GPL source, not a blob.
+
+Nobody has done it. The 2.6.38 N810 kernel has no `arch/arm/plat-omap/dsp`,
+and `dsptask` appears nowhere in the tree. Every community port simply dropped
+the DSP.
+
+So the highest-value work is **forward-porting the DSP Gateway driver**, which
+keeps every codec across a kernel upgrade with no reverse engineering at all.
+It also removes the sharpest trade-off in the section above: upgrade the
+kernel *and* keep the audio hardware.
+
+Reverse engineering is the right tool when the interface is secret. Here the
+interface is published and the compiler is the wall.
 
 ## The pattern worth reusing
 
