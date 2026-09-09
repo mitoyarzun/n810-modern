@@ -4,3 +4,4 @@ dist/
 sysroot-diablo/
 emulator/
 .deb-cache/
+.vscode/

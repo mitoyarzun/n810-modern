@@ -22,7 +22,8 @@ write yourself.
 packages containing hardlinked files, which fails on macOS shared filesystems;
 the build tree lives in a Docker volume. See [CAVEATS.md](CAVEATS.md).
 
-Linux needs nothing else. macOS:
+On Linux, Docker alone should be enough — untested, see [Tested on](#tested-on).
+macOS, which is what this has actually been run on:
 
 ```sh
 brew install colima docker
@@ -46,9 +47,36 @@ handshake. Result: `dist/handshake-diablo-armel.tar.gz`, 5.3 MB, unpacks to
 | Host | Clean build |
 | --- | --- |
 | Apple M4, native arm64 container | 1m 30s |
-| x86-64, 4 cores, Debian 13 | ~15m |
+| x86-64, 4 cores, Debian 13 | ~15m (earlier tree, see below) |
 
 Runs native by default; `PLATFORM=linux/amd64` to match a specific build host.
+
+### Tested on
+
+**macOS 26.6.1, Apple M4, colima + Docker.** Specifically:
+
+| | macOS 26.6.1 / M4 | Debian 13 / x86-64 |
+| --- | --- | --- |
+| `build-in-docker.sh` (cold, empty volume) | ✅ | earlier tree |
+| `qemu-smoke.sh`, `qemu-stunnel-test.sh` | ✅ | earlier tree |
+| `build-zlib.sh`, `build-curl.sh`, `qemu-curl-test.sh` | ✅ | not run |
+| `mk-diablo-emulator.sh`, `emulator-smoke.sh` | not run | ✅ |
+| `emulator-gui-build.sh`, `emulator-gui.sh` | not run | ✅ |
+
+So neither host has run everything. The build path is verified on macOS; the
+emulator path is verified on Linux. "Earlier tree" means it passed there before
+the zlib, curl and header-precedence changes, and has not been re-run since.
+
+The one host-specific problem we know about — hardlink extraction failing on
+shared filesystems — is macOS-only, and is already worked around. Everything
+else ought to be portable. That is an expectation, not a test result.
+
+Windows and WSL: entirely untried.
+
+**PRs welcome for other operating systems.** If you run it somewhere new,
+the useful thing to report is the output of `tools/build-in-docker.sh` and your
+host, container runtime and architecture — most failures here are silent or
+name the wrong cause, so raw output beats a summary.
 
 ### The real firmware, no hardware needed
 
