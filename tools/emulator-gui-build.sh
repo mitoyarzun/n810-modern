@@ -151,7 +151,18 @@ echo "==> 7. Creating the gconf directory ke-recv expects"
 mkdir -p rootfs/var/lib/gconf/system/osso
 chmod 0755 rootfs/var/lib/gconf/system rootfs/var/lib/gconf/system/osso
 
-echo "==> 8. Building fb-autoupdate for the guest"
+echo "==> 8. Removing the contacts button from the task navigator"
+# The left-hand task navigator loads its buttons from tasknavigator.conf. The
+# contacts plugin needs telephony and address-book backends the emulator does
+# not have, so the button does nothing but occupy the bar and load a library.
+# Drop it; the browser, applications menu and task switcher stay.
+NAV=rootfs/etc/hildon-desktop/tasknavigator.conf
+if [ -f "$NAV" ] && grep -q "osso-contact-plugin" "$NAV"; then
+  sed -i '/osso-contact-plugin\.desktop/d' "$NAV"
+  echo "    contacts plugin removed"
+fi
+
+echo "==> 9. Building fb-autoupdate for the guest"
 # The panel is manual-update: QEMU's blizzard model only redraws when the
 # guest pushes pixels through the controller's data port, and has no
 # continuous redraw. fb-progress pushes; Xomap does not, so the desktop draws
@@ -176,7 +187,7 @@ else
 fi
 
 if [ "${DEBUG_SHELL:-0}" = "1" ]; then
-  echo "==> 9. Adding a display diagnostic dump (DEBUG_SHELL=1)"
+  echo "==> 10. Adding a display diagnostic dump (DEBUG_SHELL=1)"
   # QEMU's n810 machine wires only the FIRST UART, so a second -serial is
   # silently never created and a shell on ttyS1 is unreachable. Everything
   # here therefore goes to the console, which is the path already proven by
