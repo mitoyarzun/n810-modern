@@ -120,6 +120,12 @@ Mouse is the touchscreen, keyboard is the tablet's. Use `flash.img` and
 
 ### The real firmware, no hardware needed
 
+![The Diablo desktop under QEMU](docs/desktop.png)
+
+Nokia's final N810 release, on the emulated device: the Hildon desktop at
+800x480, the tablet's own resolution. No hardware. This is a `screendump` from
+the QEMU monitor, taken about ten minutes after the boot starts.
+
 ```sh
 tools/mk-diablo-emulator.sh     # fetch and unpack Nokia's final N810 release
 tools/emulator-smoke.sh         # run our binaries on the real 2.6.21 kernel
