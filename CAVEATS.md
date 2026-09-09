@@ -31,6 +31,13 @@ producer outruns the pipe buffer, so short commands seem fine. Capture the
 output and match a variable with a here-string instead. Two checks in
 `check-artifact.sh` were silently vacuous because of this.
 
+**A sourced file returns its last command's status.** `env.sh` ended with a
+conditional echo, which is false whenever nothing is staged yet -- so sourcing
+it returned 1, and every caller written as `. env.sh && $CC ...` silently
+skipped the compile. That disabled the display fix in the emulator image, with
+one warning as the only symptom and a frozen boot splash much later as the
+consequence. End such files with `:`.
+
 **Put the finite producer first in a pipeline.** `tr … < /dev/zero | head -c N`
 kills `tr` with SIGPIPE and, under `set -e`, aborts the script mid-run with no
 error. Write `head -c N /dev/zero | tr …`.

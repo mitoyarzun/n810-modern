@@ -113,3 +113,9 @@ echo "  sysroot   $DIABLO_SYSROOT (glibc 2.5, headers 2.6.16)"
 echo "  target    $TARGET (armv6, softfp, ld-linux.so.3)"
 echo "  prefix    $HANDSHAKE_PREFIX (on-device)"
 [ -n "$STAGE_INCLUDE" ] && echo "  staged    $HANDSHAKE_STAGE (our headers precede the sysroot's)"
+
+# Always succeed. A sourced file returns the status of its last command, and
+# the conditional echo above is false whenever nothing is staged yet -- which
+# silently made `. env.sh && $CC ...` skip the compile in
+# emulator-gui-build.sh, disabling the display fix with only a warning.
+:

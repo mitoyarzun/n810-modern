@@ -78,6 +78,45 @@ the useful thing to report is the output of `tools/build-in-docker.sh` and your
 host, container runtime and architecture — most failures here are silent or
 name the wrong cause, so raw output beats a summary.
 
+### Running it in a native window (macOS)
+
+The emulator scripts use VNC because they are written to run anywhere,
+including headless. For a real window on macOS you need your own QEMU: the
+`n810` machine was removed in **9.2**, and Homebrew ships 11.x, so no packaged
+build can run this.
+
+QEMU 9.1.3 is the last release with the machine, and one target builds in
+well under a minute:
+
+```sh
+curl -O https://download.qemu.org/qemu-9.1.3.tar.xz
+tar xf qemu-9.1.3.tar.xz && cd qemu-9.1.3
+python3 -m venv /tmp/qemu-py && /tmp/qemu-py/bin/pip install distlib
+./configure --target-list=arm-softmmu --enable-cocoa --disable-docs \
+            --disable-tools --disable-guest-agent --python=/tmp/qemu-py/bin/python3
+make -j$(sysctl -n hw.ncpu)
+```
+
+The `distlib` venv is needed because QEMU's build bootstraps its own virtualenv
+and current Homebrew Python does not ship it.
+
+The image still has to be built in the container -- `mkfs.jffs2` and `0xFFFF`
+are Linux-only -- so copy it out and run it natively:
+
+```sh
+docker run --rm -v n810-build:/work -v "$PWD/dist/emulator:/out" ubuntu:24.04 \
+  sh -c 'cp /work/emulator/flash-gui.img /work/emulator/unpacked/kernel_* /out/'
+
+./build/qemu-system-arm -M n810 -m 128 \
+  -kernel dist/emulator/kernel_* \
+  -drive file=dist/emulator/flash-gui.img,format=raw,if=mtd \
+  -append "console=ttyS0,115200n8 root=/dev/mtdblock3 rootfstype=jffs2 rw init=/linuxrc" \
+  -display cocoa
+```
+
+Mouse is the touchscreen, keyboard is the tablet's. Use `flash.img` and
+`init=/bin/sh` instead for a shell rather than the desktop.
+
 ### The real firmware, no hardware needed
 
 ```sh
