@@ -60,12 +60,13 @@ Runs native by default; `PLATFORM=linux/amd64` to match a specific build host.
 | `build-in-docker.sh` (cold, empty volume) | ✅ | earlier tree |
 | `qemu-smoke.sh`, `qemu-stunnel-test.sh` | ✅ | earlier tree |
 | `build-zlib.sh`, `build-curl.sh`, `qemu-curl-test.sh` | ✅ | not run |
-| `mk-diablo-emulator.sh`, `emulator-smoke.sh` | not run | ✅ |
-| `emulator-gui-build.sh`, `emulator-gui.sh` | not run | ✅ |
+| `mk-diablo-emulator.sh`, `emulator-smoke.sh` | ✅ | ✅ |
+| `emulator-gui-build.sh` + native window | ✅ | — |
+| `emulator-gui.sh` (VNC) | not run | ✅ |
 
-So neither host has run everything. The build path is verified on macOS; the
-emulator path is verified on Linux. "Earlier tree" means it passed there before
-the zlib, curl and header-precedence changes, and has not been re-run since.
+macOS has run everything except the VNC frontend, which is the same image
+served differently. "Earlier tree" means it passed on Linux before the zlib,
+curl and header-precedence changes, and has not been re-run since.
 
 The one host-specific problem we know about — hardlink extraction failing on
 shared filesystems — is macOS-only, and is already worked around. Everything
@@ -143,18 +144,34 @@ storage needs nothing installed.
 
 ## Status
 
-Working: OpenSSL 3.5.8 and stunnel 5.80 for armv6, alongside the stock 0.9.8e
-rather than over it. Both providers load, RSA and EC keygen work, TLS 1.3 to
-`example.org` verifies, and stunnel turns a plain-HTTP client into a verified
-TLS 1.3 connection — which is how stock applications get modern TLS without
-being rebuilt. All verified on the real firmware and kernel under emulation.
+Four packages in `/opt/handshake`, all alongside the stock libraries rather
+than over them:
+
+| | |
+| --- | --- |
+| OpenSSL | 3.5.8 |
+| stunnel | 5.80 |
+| zlib | 1.3.2 |
+| curl | 8.22.0 |
+
+Both OpenSSL providers load, RSA and EC keygen work, TLS 1.3 to `example.org`
+verifies, and an expired certificate is correctly refused. stunnel turns a
+plain-HTTP client into a verified TLS 1.3 connection, which is how stock
+applications get modern TLS without being rebuilt. curl reports:
+
+```
+curl 8.22.0 (arm-unknown-linux-gnueabi) libcurl/8.22.0 OpenSSL/3.5.8 zlib/1.3.2
+```
+
+All verified on the real firmware and kernel under emulation.
 
 **Not yet run on physical hardware.** Still hardware-only: real timings, WiFi,
 the RTC clock, flash wear.
 
-Next: `wget`, then `curl` and `git`, then Python's `_ssl`. Then a static apt
-repository over plain HTTP with signed packages — you cannot fetch the thing
-that enables HTTPS over HTTPS.
+Next: `git`, then a browser — NetSurf's framebuffer frontend is the only
+realistic option, and curl was its hard prerequisite. Then a static apt
+repository over plain HTTP with signed packages, because you cannot fetch the
+thing that enables HTTPS over HTTPS.
 
 ## Tools
 
@@ -166,9 +183,12 @@ env.sh                  cross-env: modern GCC -> glibc 2.5
 build-openssl.sh        OpenSSL 3.5 LTS for armv6
 mk-truststore.sh        current CA store, checksum-verified
 build-stunnel.sh        stunnel 5.80 against the above
+build-zlib.sh           zlib 1.3.2 (the device's 1.2.3 is too old, and CVE-ridden)
+build-curl.sh           curl 8.22.0 against our OpenSSL and zlib
 check-artifact.sh       static checks: will this run on the device
 qemu-smoke.sh           run it on the device's own glibc 2.5
 qemu-stunnel-test.sh    plain HTTP in, verified TLS 1.3 out
+qemu-curl-test.sh       fetch a page; confirm a bad certificate is refused
 mk-diablo-emulator.sh   fetch and unpack the real firmware
 emulator-smoke.sh       run it on the real 2.6.21 kernel
 emulator-gui-build.sh   build an image that reaches the desktop
