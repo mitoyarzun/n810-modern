@@ -173,6 +173,9 @@ realistic option, and curl was its hard prerequisite. Then a static apt
 repository over plain HTTP with signed packages, because you cannot fetch the
 thing that enables HTTPS over HTTPS.
 
+[APPS.md](APPS.md) is the backlog: what can realistically run on this device
+and why, checked against the actual firmware rather than the spec sheet.
+
 ## Tools
 
 ```
@@ -185,6 +188,7 @@ mk-truststore.sh        current CA store, checksum-verified
 build-stunnel.sh        stunnel 5.80 against the above
 build-zlib.sh           zlib 1.3.2 (the device's 1.2.3 is too old, and CVE-ridden)
 build-curl.sh           curl 8.22.0 against our OpenSSL and zlib
+build-openssh.sh        OpenSSH 10.5p1 -- a shell and scp on the device
 check-artifact.sh       static checks: will this run on the device
 qemu-smoke.sh           run it on the device's own glibc 2.5
 qemu-stunnel-test.sh    plain HTTP in, verified TLS 1.3 out
@@ -226,6 +230,7 @@ is old.
 
 - [CAVEATS.md](CAVEATS.md) — failures that do not announce themselves. Read
   this before debugging anything.
+- [APPS.md](APPS.md) — what is realistic to port, and what is not.
 - [DECISIONS.md](DECISIONS.md) — what the device ships, and why this is built
   the way it is.
 - [BUILDLOG.md](BUILDLOG.md) — the long form: every failure, with the logs.
