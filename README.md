@@ -195,6 +195,7 @@ qemu-stunnel-test.sh    plain HTTP in, verified TLS 1.3 out
 qemu-curl-test.sh       fetch a page; confirm a bad certificate is refused
 mk-diablo-emulator.sh   fetch and unpack the real firmware
 emulator-smoke.sh       run it on the real 2.6.21 kernel
+probe-kernel.sh         ask that kernel what it supports (TUN, audio, iptables)
 emulator-gui-build.sh   build an image that reaches the desktop
 emulator-gui.sh         boot that, over VNC
 fb-autoupdate.c         forces the panel to refresh; built for the guest
