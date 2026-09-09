@@ -134,8 +134,24 @@ So a userspace VPN can move packets. That was the only hard blocker.
 **Kernel WireGuard: no.** `wireguard-linux-compat` reaches back to Linux 3.10.
 This kernel is 2.6.21, which is not close.
 
-**wireguard-go and boringtun: no.** Go needs Linux 2.6.32 as a floor and Rust
-needs newer still. Neither toolchain targets this kernel.
+**wireguard-go and boringtun: no,** and the reason is sharper than "the
+kernel is too old". `tools/probe-kernel.sh` asks the kernel for the syscalls
+these runtimes make:
+
+```
+futex WAIT         present, errno=Resource temporarily unavailable
+futex WAIT_PRIVATE ABSENT  (ENOSYS)   (Go runtime locks)
+eventfd2           ABSENT  (ENOSYS)   (Go netpollBreak)
+epoll_create1      ABSENT  (ENOSYS)   (Go + Node netpoll)
+pipe2              ABSENT  (ENOSYS)   (Node, libuv)
+accept4            ABSENT  (ENOSYS)   (Go, libuv)
+getrandom          ABSENT  (ENOSYS)   (Go, Rust, Node)
+```
+
+Plain `futex` works. `FUTEX_WAIT_PRIVATE`, which the Go runtime uses for every
+mutex, does not exist -- it arrived in 2.6.22. **Go cannot take a lock on this
+kernel**, so no Go program runs, whatever you compile it with. Static linking
+does not help, because the gap is the kernel, not glibc.
 
 **A userspace WireGuard in C: yes, and nothing blocks it.** WireGuard needs
 three primitives, and the OpenSSL 3.5.8 we already ship has all three. Asked
@@ -155,17 +171,59 @@ item in this document where the device needs no bridge at all.
 
 ### Tailscale
 
-**No.** The client is Go, so the kernel floor blocks it, and a ~30 MB binary
-does not suit 128 MB of RAM.
+The client is Go, so the syscall table above rules it out. The tablet cannot
+be a tailnet node. It can still reach the tailnet, in three ways.
 
-Use a **subnet router** on other hardware instead. The tablet joins the LAN
-over WiFi and reaches the tailnet through that router. This needs no porting
-and works today.
+**1. A SOCKS5 proxy. Works today, no code.** Run `tailscaled` in userspace
+mode on any machine on the LAN:
+
+```
+tailscaled --tun=userspace-networking --socks5-server=<lan-ip>:1055
+```
+
+Our curl already speaks it, and `--socks5-hostname` resolves at the proxy, so
+MagicDNS names work:
+
+```
+curl --socks5-hostname <lan-ip>:1055 http://host.tailnet-name.ts.net/
+```
+
+Both flags are in tailscaled 1.98.9. Only proxy-aware programs benefit.
+
+**Warning: tailscaled's SOCKS5 server has no authentication.** Anything that
+reaches that port gets your whole tailnet. Bind it to one interface and
+firewall it to the tablet's address. Never bind it to `0.0.0.0`.
+
+**2. A subnet router. Works today, and every program benefits.** A LAN machine
+runs `tailscale up --advertise-routes=100.64.0.0/10`, and the tablet takes a
+static route through it:
+
+```
+ip route add 100.64.0.0/10 via <router-lan-ip>
+```
+
+More transparent than the proxy, because it needs no per-program support. The
+tablet still has no Tailscale identity, and MagicDNS needs its resolver
+pointed at the router.
+
+**3. A WireGuard bridge. Needs the C client above written first.** A plain
+WireGuard endpoint that is itself on the tailnet gives the tablet an encrypted
+tunnel that also works away from home, on untrusted WiFi, which neither option
+above does. [TailGuard](https://github.com/juhovh/tailguard) is an existing
+container for exactly this case: a WireGuard host that cannot run Tailscale
+binaries.
+
+**Joining as a real node: no.** That means reimplementing the control plane,
+DERP relays, MagicDNS and NAT traversal in C. Whether Tailscale still accepts
+WireGuard-only peers directly is worth checking before building option 3; we
+did not confirm it either way.
 
 ### Claude Code and other AI harnesses
 
-**Claude Code itself: no.** It is Node.js. Node 18 needs glibc 2.28 and C++17;
-the device has glibc 2.5 and `GLIBCXX_3.4`. No bridge argument saves this.
+**Claude Code itself: no.** It is Node.js, and the syscall probe above shows
+`epoll_create1`, `pipe2` and `accept4` all missing, so libuv has no event loop
+to build on. Node also needs glibc 2.28 and C++17 against the device's glibc
+2.5 and `GLIBCXX_3.4`. No bridge argument saves this.
 
 Two things do work:
 

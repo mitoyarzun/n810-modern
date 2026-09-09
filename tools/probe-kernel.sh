@@ -14,7 +14,8 @@
 #   2. What audio devices exist? Decides push-to-talk. QEMU models no audio
 #      codec, so expect none. That is an emulator limit, not a device limit.
 #   3. Does iptables run?        Decides routing.
-#   4. What crypto does the kernel offer?
+#   4. Which syscalls do Go, Node and Rust runtimes need, and are they here?
+#   5. What crypto does the kernel offer?
 set -euo pipefail
 
 OUT="${1:-$PWD/out}"
@@ -65,11 +66,62 @@ int main(void) {
 }
 C
 
+# "Go needs kernel 2.6.32" is received wisdom. The useful question is which
+# syscalls its runtime actually makes, so this asks the kernel directly.
+# An unimplemented syscall returns ENOSYS, which is unambiguous.
+cat > /tmp/syscall-probe.c <<'C'
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
+#include <unistd.h>
+#include <sys/syscall.h>
+
+/* ARM EABI syscall numbers. */
+#define NR_futex          240
+#define NR_eventfd        351   /* 2.6.22 */
+#define NR_epoll_create1  357   /* 2.6.27 */
+#define NR_eventfd2       356   /* 2.6.27 */
+#define NR_pipe2          359   /* 2.6.27 */
+#define NR_accept4        366   /* 2.6.28 */
+#define NR_getrandom      384   /* 3.17   */
+
+#define FUTEX_WAIT          0
+#define FUTEX_PRIVATE_FLAG  128   /* 2.6.22 */
+
+static void report(const char *what, long r, const char *needed_by) {
+    if (r >= 0)               printf("  %-18s present            (%s)\n", what, needed_by);
+    else if (errno == ENOSYS) printf("  %-18s ABSENT  (ENOSYS)   (%s)\n", what, needed_by);
+    else                      printf("  %-18s present, errno=%-8s (%s)\n",
+                                     what, strerror(errno), needed_by);
+}
+
+int main(void) {
+    int word = 1;
+    /* FUTEX_WAIT with a mismatched value returns EAGAIN when supported, so it
+       never blocks. ENOSYS means the kernel does not know the operation. */
+    errno = 0;
+    report("futex WAIT",
+           syscall(NR_futex, &word, FUTEX_WAIT, 999, NULL, NULL, 0), "everything");
+    errno = 0;
+    report("futex WAIT_PRIVATE",
+           syscall(NR_futex, &word, FUTEX_WAIT | FUTEX_PRIVATE_FLAG, 999, NULL, NULL, 0),
+           "Go runtime locks");
+    errno = 0; report("eventfd",       syscall(NR_eventfd, 0),        "-");
+    errno = 0; report("eventfd2",      syscall(NR_eventfd2, 0, 0),    "Go netpollBreak");
+    errno = 0; report("epoll_create1", syscall(NR_epoll_create1, 0),  "Go + Node netpoll");
+    errno = 0; report("pipe2",         syscall(NR_pipe2, (int[2]){0,0}, 0), "Node, libuv");
+    errno = 0; report("accept4",       syscall(NR_accept4, -1, 0, 0, 0),    "Go, libuv");
+    errno = 0; report("getrandom",     syscall(NR_getrandom, &word, 1, 0),  "Go, Rust, Node");
+    return 0;
+}
+C
+
 # shellcheck source=env.sh
 . "$HERE/env.sh" "$SYSROOT"
 
-echo "==> Cross-compiling tun-probe"
+echo "==> Cross-compiling probes"
 $CC /tmp/tun-probe.c -o rootfs/root/tun-probe
+$CC /tmp/syscall-probe.c -o rootfs/root/syscall-probe
 
 cat > rootfs/root/probe.sh <<'TEST'
 #!/bin/sh
@@ -95,7 +147,10 @@ ls /dev/dsp* /dev/audio* 2>/dev/null || echo "  no OSS nodes"
 echo; echo "=== 3. iptables ==="
 /sbin/iptables -L -n 2>&1 | head -8
 
-echo; echo "=== 4. kernel crypto ==="
+echo; echo "=== 4. syscalls modern runtimes need ==="
+/root/syscall-probe
+
+echo; echo "=== 5. kernel crypto ==="
 grep '^name' /proc/crypto 2>/dev/null | sort -u | head -20 || echo "  no /proc/crypto"
 
 echo "================ DONE ================"
