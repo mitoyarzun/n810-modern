@@ -151,7 +151,8 @@ getrandom          ABSENT  (ENOSYS)   (Go, Rust, Node)
 Plain `futex` works. `FUTEX_WAIT_PRIVATE`, which the Go runtime uses for every
 mutex, does not exist -- it arrived in 2.6.22. **Go cannot take a lock on this
 kernel**, so no Go program runs, whatever you compile it with. Static linking
-does not help, because the gap is the kernel, not glibc.
+does not help, because the gap is the kernel, not glibc. This is the one gate
+you can remove -- see [Upgrading the kernel](#upgrading-the-kernel).
 
 **A userspace WireGuard in C: yes, and nothing blocks it.** WireGuard needs
 three primitives, and the OpenSSL 3.5.8 we already ship has all three. Asked
@@ -259,6 +260,71 @@ CPU gate completely.
 
 That is a limit of the emulator, not of the device. Audio work waits for
 hardware.
+
+## Upgrading the kernel
+
+Every "no" above traces back to Linux 2.6.21. That gate is the only one you
+can remove, so it is worth knowing the price.
+
+**It has been done, several times.** [ssvb/linux-n810](https://github.com/ssvb/linux-n810)
+is mainline 2.6.38.8 with the OpenWrt patches. OpenWrt itself ran 3.3.8 on the
+N810. There was a Debian port on post-2.6.30 kernels.
+
+**Mainline still carries the board.** `arch/arm/mach-omap2/board-n8x0.c` is in
+Linus's tree today and someone still works on it:
+
+```
+2026-05-07  p54spi: convert to devicetree
+2025-07-18  arm: omap2: use string choices helper
+2024-02-23  ARM: OMAP2+: fix USB regression on Nokia N8x0
+```
+
+WiFi (`p54spi`), MMC, USB and the Menelaus PMIC are all mainline. So is the
+N810 audio machine driver, `sound/soc/ti/n810.c`.
+
+### What a newer kernel buys
+
+Measured against the syscall probe above:
+
+| Syscall | Arrived in |
+| --- | --- |
+| `FUTEX_WAIT_PRIVATE` | 2.6.22 |
+| `eventfd2`, `epoll_create1`, `pipe2` | 2.6.27 |
+| `accept4` | 2.6.28 |
+| `getrandom` | 3.17 — Go falls back to `/dev/urandom`, so not fatal |
+
+Go needs 2.6.32 up to Go 1.23, and **3.2 from Go 1.24**. So the 3.3.8 kernel
+clears current Go, and **Tailscale runs on the device itself**. Its
+userspace-networking mode is wireguard-go over TUN, and TUN already works
+here. Kernel WireGuard is separate: `wireguard-linux-compat` wants 3.10, so
+that needs a mainline build, not a community one.
+
+### What it costs
+
+**Maemo goes.** Every port above replaced the userspace — OpenWrt, Debian,
+Android. Diablo's closed Nokia modules are built against 2.6.21 and will not
+rebuild. You get a Linux box in a tablet case, not a tablet.
+
+**The DSP goes.** It was never mainlined. That throws away the hardware video
+decode and the DSP audio codecs — which are exactly what made Plex playback
+and SIP video plausible in the first place.
+
+**On mainline, the N810 screen goes too.** `drivers/video/fbdev/omap/` offers
+the Epson HWA742, which is the N800's controller. The N810 uses the Blizzard,
+and there is no driver for it in the current tree. The older community kernels
+still have one.
+
+### So which way
+
+The two strategies pull against each other, and that is the real decision:
+
+- **Keep 2.6.21.** Keep Maemo, the DSP and the screen. Reach the modern world
+  through bridges — stunnel, a SOCKS5 proxy, a transcode shim. Nothing here
+  needs new hardware support.
+- **Upgrade.** Get Go, Tailscale, current everything. Lose the tablet.
+
+This repository takes the first path (DECISIONS #1). The second is a real
+option, not a fantasy, and someone should try it. It is a different project.
 
 ## The pattern worth reusing
 
