@@ -299,6 +299,60 @@ userspace-networking mode is wireguard-go over TUN, and TUN already works
 here. Kernel WireGuard is separate: `wireguard-linux-compat` wants 3.10, so
 that needs a mainline build, not a community one.
 
+### Keeping Diablo, on a newer kernel
+
+This is a different goal from the ports above, which all replaced the
+userspace. It is also the most tractable, because the question is narrow: what
+does Diablo need from 2.6.21 that a newer kernel would not give it?
+
+The kernel image answers most of it. It embeds its own source paths, so the
+out-of-tree surface can be listed rather than guessed:
+
+| Piece | Path in Nokia's tree | On a newer kernel |
+| --- | --- | --- |
+| DSP Gateway | `arch/arm/plat-omap/dsp/{dsp_core,dsp_ctl,task}.c` | GPL, never mainlined — forward-port it |
+| Power, PMIC, power button | `drivers/cbus/{retu,tahvo,retu-pwrbutton}.c` | GPL; retu and tahvo later reached mainline |
+| Display | `drivers/video/omap/{blizzard,dispc,rfbi}.c` | GPL; **gone from current mainline** — only `hwa742.c` survives |
+| Board glue | `arch/arm/mach-omap2/board-n800-{audio,bt,camera,mmc}.c` | superseded by mainline `board-n8x0.c` |
+| Keypad | `drivers/input/keyboard/tsc2301_kp.c` | GPL |
+| WiFi | `cx3110x.ko`, `umac.ko` | **closed, and you do not need them** |
+
+**WiFi is the happy surprise.** The one piece with no source is the one to
+throw away. Mainline's `p54spi` says so itself:
+
+```
+config P54_SPI
+	tristate "Prism54 SPI (stlc45xx) support"
+	  This driver is for stlc4550 or stlc4560 based wireless chips
+	  such as Nokia's N800/N810 Portable Internet Tablet.
+```
+
+and it loads `3826.arm` -- the same firmware blob already sitting in the
+device's own initfs. Diablo's `wlancond` drives WiFi through Wireless
+Extensions (`SIOCGIWAP`), which `CONFIG_CFG80211_WEXT` still provides. So an
+open driver can sit under an unmodified Maemo.
+
+### How far to go
+
+| Target | Gains | Risk to Diablo |
+| --- | --- | --- |
+| **2.6.28-2.6.31** | every syscall that blocks modern C: `FUTEX_WAIT_PRIVATE` (2.6.22), `epoll_create1`, `eventfd2`, `pipe2` (2.6.27), `accept4` (2.6.28) | low — omapfb v1 still has `blizzard.c`, and the Nokia drivers still fit the era's APIs |
+| **2.6.38** | as above; [ssvb/linux-n810](https://github.com/ssvb/linux-n810) proves the hardware runs here | medium — omapfb gives way to DSS2, and platform code churns |
+| **3.2+** | Go 1.24, so Tailscale runs on the device | high — this is where keeping Diablo starts to fight you |
+
+**Aim at 2.6.28 first.** It is about 18 months of kernel churn, not eighteen
+years. It keeps the display, keeps the DSP for a short forward-port, swaps
+closed WiFi for open, and unblocks most modern C software.
+
+One concrete check that this repository already depends on: `fb-autoupdate.c`
+uses `OMAPFB_SET_UPDATE_MODE`, an omapfb v1 ioctl. It survives at 2.6.28 and
+breaks at DSS2. That single ioctl is a good early warning for the whole
+display path.
+
+What 2.6.28 does **not** buy is Go, so Tailscale stays on the SOCKS5 or
+subnet-router bridge above. That is the trade: a short hop keeps the tablet, a
+long hop gets Go.
+
 ### What it costs
 
 **Maemo goes.** Every port above replaced the userspace — OpenWrt, Debian,

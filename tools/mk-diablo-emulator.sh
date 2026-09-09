@@ -47,7 +47,12 @@ echo "    kernel  $(basename "$KERNEL")"
 echo "    initfs  $(basename "$INITFS")"
 echo "    rootfs  $(basename "$ROOTFS")"
 
-if [ ! -d rootfs ]; then
+# Two trees, because every build script writes into the rootfs: rootfs.stock
+# is the untouched extraction, and rootfs is the working copy they patch.
+# tools/emulator-gui-build.sh refreshes the working copy from the stock one,
+# so a customised image is the firmware plus your overlay, not the firmware
+# plus every earlier run. Costs one copy, about 250 MB.
+if [ ! -d rootfs.stock ]; then
   echo "==> Extracting the JFFS2 rootfs"
   if ! command -v jefferson >/dev/null; then
     python3 -m venv .venv >/dev/null 2>&1
@@ -58,9 +63,15 @@ if [ ! -d rootfs ]; then
   fi
   $JEFF -d rootfs.tmp "$ROOTFS" >/dev/null 2>&1
   # jefferson writes into a numbered subdirectory when the image has one
-  # filesystem; normalise so callers always get ./rootfs.
-  if [ -d rootfs.tmp/fs_1 ]; then mv rootfs.tmp/fs_1 rootfs; rm -rf rootfs.tmp
-  else mv rootfs.tmp rootfs; fi
+  # filesystem; normalise so callers always get ./rootfs.stock.
+  if [ -d rootfs.tmp/fs_1 ]; then mv rootfs.tmp/fs_1 rootfs.stock; rm -rf rootfs.tmp
+  else mv rootfs.tmp rootfs.stock; fi
+fi
+
+# An older working directory has a rootfs and no stock tree; keep that rootfs.
+if [ ! -d rootfs ]; then
+  echo "==> Copying the working rootfs from rootfs.stock"
+  cp -a rootfs.stock rootfs
 fi
 
 echo
