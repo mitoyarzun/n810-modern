@@ -340,6 +340,43 @@ open driver can sit under an unmodified Maemo.
 | **2.6.38** | as above; [ssvb/linux-n810](https://github.com/ssvb/linux-n810) proves the hardware runs here | medium — omapfb gives way to DSS2, and platform code churns |
 | **3.2+** | Go 1.24, so Tailscale runs on the device | high — this is where keeping Diablo starts to fight you |
 
+**This is now started, not theory.** `tools/mk-kernel-2628.sh` fetches Nokia's
+GPL kernel source, computes their delta against vanilla 2.6.21, applies it to
+2.6.28, and generates their board config on the result:
+
+```
+Computing the Nokia delta      638 files, 5.0M
+Applying it to 2.6.28          patched: 508 files   rejects: 173 files
+
+  arch/arm/plat-omap/dsp       10 .c files, 0 rejects
+  drivers/cbus                 10 .c files, 0 rejects
+  drivers/video/omap           21 .c files, 0 rejects
+  sound/arm/omap               12 .c files, 0 rejects
+
+.config written: 1804 lines
+  CONFIG_OMAP_DSP=y
+  CONFIG_ARCH_OMAP2420=y
+```
+
+**Every Nokia subsystem applies with zero rejects**, because they are new
+files rather than edits. The 173 rejects are all in shared core files, and
+most need no work at all -- Nokia was a large OMAP contributor, so 2.6.28
+already has their change:
+
+```
+file                       van-2.6.21  NOKIA  van-2.6.28
+fs/jffs2/readinode.c       1019        1435   1438
+arch/arm/plat-omap/fb.c    79          344    342
+```
+
+Check each reject against vanilla 2.6.28 **before** porting it. The usual
+right answer is to drop it.
+
+Still missing: a compiled `zImage`. A 2.6.28 tree does not build with GCC 13,
+so this needs a 4.x-era cross compiler. The flashing mechanism is known to
+work and to keep Maemo -- Diablo-Turbo did it in 2011 with
+`fiasco-flasher -f -k zImage`.
+
 **Aim at 2.6.28 first.** It is about 18 months of kernel churn, not eighteen
 years. It keeps the display, keeps the DSP for a short forward-port, swaps
 closed WiFi for open, and unblocks most modern C software.
