@@ -59,9 +59,22 @@ self-hosted server (Asterisk, FreeSWITCH, Kamailio) may work by configuration
 alone. Untested — needs the hardware.
 
 **SIP video calls.** Unlike WebRTC, SIP lets you *negotiate* the codec, and
-both ends are yours. With Hantro doing the work rather than the CPU, H.263 at
-QCIF is plausible. Read `/etc/farsight/gstcodecs.conf` before assuming what
-gets offered.
+both ends are yours. `/etc/farsight/gstcodecs.conf` says exactly what the
+device will offer:
+
+```
+[video/H263]       QCIF=2          176x144
+[video/H263-1998]  QCIF=2
+[audio/PCMA] [audio/PCMU]          G.711 A-law / mu-law
+[audio/iLBC] mode=30
+[audio/G729]
+
+disabled (id=-1): SPEEX, GSM, AMR, VORBIS, THEORA
+```
+
+So a bridge must transcode **VP8/H.264 -> H.263 QCIF** and **Opus -> G.711**.
+FreeSWITCH and Janus both do this already. Audio needs no transcoding at all:
+G.711 is universal on modern SIP servers.
 
 **Video playback from Plex/Jellyfin.** The most feasible app of the lot: the
 hard part (hardware decode) already exists. The crux is the transcode profile,
