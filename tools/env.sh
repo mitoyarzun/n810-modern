@@ -100,13 +100,24 @@ export CFLAGS="-O2 -pipe"
 # Match the include ordering: our staged libraries before the sysroot's.
 STAGE_LIB=""
 [ -d "$HANDSHAKE_STAGE/lib" ] && STAGE_LIB="-L$HANDSHAKE_STAGE/lib"
-export LDFLAGS="-Wl,-z,noexecstack $STAGE_LIB"
 
 # Where built artefacts land on the device. Deliberately NOT /usr: the whole
 # point is to sit alongside the stock OpenSSL 0.9.8e, never on top of it. Also
 # keeps several MB off the 256 MB rootfs -- mount or symlink this from the
 # 2 GB internal flash.
 export HANDSHAKE_PREFIX="${HANDSHAKE_PREFIX:-/opt/handshake}"
+
+# -rpath is the ON-DEVICE path, not the staging one. Without it every binary
+# we ship needs LD_LIBRARY_PATH set by hand before it will start:
+#     ./curl: error while loading shared libraries: libssl.so.3:
+#     cannot open shared object file: No such file or directory
+# /opt/handshake/lib is not in the device's default search path and we
+# deliberately do not touch /etc/ld.so.conf -- the rule everywhere here is to
+# coexist with the stock system, never modify it. Baking the path into the
+# binaries keeps that promise and still makes them run straight out of the
+# tarball. glibc 2.5 honours DT_RPATH.
+export LDFLAGS="-Wl,-z,noexecstack $STAGE_LIB -Wl,-rpath,$HANDSHAKE_PREFIX/lib"
+
 
 echo "diablo cross-env ready"
 echo "  sysroot   $DIABLO_SYSROOT (glibc 2.5, headers 2.6.16)"

@@ -116,6 +116,27 @@ for f in "$@"; do
         ;;
     esac
   done
+  # 8. Anything that depends on a library we ship must carry an RPATH or
+  #    RUNPATH pointing at the on-device prefix. Otherwise it will not start
+  #    without LD_LIBRARY_PATH set by hand:
+  #        ./curl: error while loading shared libraries: libssl.so.3
+  #    We deliberately do not touch the device's /etc/ld.so.conf, so the path
+  #    has to be baked into the binary instead.
+  ours=0
+  for lib in $needed; do
+    case "$lib" in
+      libssl.so.*|libcrypto.so.*|libz.so.*|libcurl.so.*) ours=1 ;;
+    esac
+  done
+  if [ "$ours" = 1 ]; then
+    rpath=$($T-readelf -d "$f" 2>/dev/null | grep -oE '\(R(UN)?PATH\).*\[[^]]*\]' | grep -oE '\[[^]]*\]' | tr -d '[]')
+    case "$rpath" in
+      */opt/handshake/lib*) echo "   ok    rpath $rpath" ;;
+      "")  echo "   FAIL  needs our libraries but has no RPATH; will not start without LD_LIBRARY_PATH"; bad=1 ;;
+      *)   echo "   FAIL  rpath is '$rpath', expected /opt/handshake/lib"; bad=1 ;;
+    esac
+  fi
+
   [ -n "$needed" ] && echo "   note  NEEDED: $(echo $needed | tr '\n' ' ')"
 
   [ $bad -eq 0 ] || rc=1
