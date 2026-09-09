@@ -62,9 +62,35 @@ tar xzf kernel-source-diablo_2.6.21.orig.tar.gz
   gzip -dc ../kernel-source-diablo_2.6.21-200842maemo1.diff.gz | patch -p1 --forward --silent )
 
 echo "==> Extracting vanilla trees"
-rm -rf linux-2.6.21 linux-2.6.28
+rm -rf linux-2.6.21 linux-2.6.28 vanilla-2.6.28
 tar xf linux-2.6.21.tar.xz
 tar xf linux-2.6.28.tar.xz
+# A pristine copy to restore from. Everything below compares against it.
+cp -a linux-2.6.28 vanilla-2.6.28
+
+# 2.6.28 MOVED THE ARM HEADERS, and this is the trap of the whole exercise.
+#   include/asm-arm/           -> arch/arm/include/asm/
+#   include/asm-arm/arch-omap/ -> arch/arm/plat-omap/include/mach/
+# 56 of the 638 files in Nokia's delta live under the old paths, and 50 of
+# those are the OMAP headers -- blizzard.h, board-nokia.h, aic23.h, the ones
+# the N810 cannot boot without. Patching them at the old path SUCCEEDS and
+# then does nothing, because 2.6.28 never reads that directory. No error, no
+# reject: the build just fails later with a missing ATAG_BOARD.
+#
+# So relocate both source trees to the 2.6.28 layout BEFORE diffing. Then the
+# delta is expressed in paths 2.6.28 actually uses.
+echo "==> Relocating ARM headers to the 2.6.28 layout"
+for t in linux-2.6.21 kernel-source-diablo/kernel-source; do
+  if [ -d "$t/include/asm-arm/arch-omap" ]; then
+    mkdir -p "$t/arch/arm/plat-omap/include"
+    mv "$t/include/asm-arm/arch-omap" "$t/arch/arm/plat-omap/include/mach"
+  fi
+  if [ -d "$t/include/asm-arm" ]; then
+    mkdir -p "$t/arch/arm/include"
+    mv "$t/include/asm-arm" "$t/arch/arm/include/asm"
+  fi
+done
+echo "    moved in both trees"
 
 echo "==> Computing the Nokia delta (their 2.6.21 vs vanilla 2.6.21)"
 # debian/ is packaging, not kernel code, so it is excluded.
@@ -101,6 +127,105 @@ echo "    took the change. Those rejects are dropped, not ported."
 
 cd linux-2.6.28
 
+# Some files came out with Nokia's version APPENDED to 2.6.28's rather than
+# merged, so a function ends up defined twice. Where upstream restructured the
+# code, Nokia's 2.6.21 version is simply obsolete and vanilla 2.6.28 already
+# does the same job: memory.c is the clear case, where 2.6.28 replaced the
+# cast-lvalue register macros with sdrc_write_reg()/sms_write_reg() inlines.
+# Take vanilla for these.
+echo "==> Restoring files that 2.6.28 superseded"
+for f in arch/arm/mach-omap2/memory.c \
+         arch/arm/mach-omap2/devices.c \
+         arch/arm/mach-omap2/serial.c \
+         arch/arm/mach-omap2/gpmc.c \
+         arch/arm/mach-omap2/pm.c \
+         arch/arm/plat-omap/include/mach/pm.h; do
+  if tar xf ../linux-2.6.28.tar.xz --strip-components=1 -C . "linux-2.6.28/$f" 2>/dev/null; then
+    echo "    vanilla: $f"
+  else
+    echo "    NOT IN VANILLA (skipped): $f"
+  fi
+done
+
+# The header move has a second half. 2.6.28 also renamed the include style:
+#   #include <asm/arch/foo.h>   ->   #include <mach/foo.h>
+# Nokia's files still use the old spelling, so they fail to find headers that
+# are now present. Vanilla 2.6.28 files were all converted upstream, so a
+# sweep only touches Nokia's.
+echo "==> Rewriting asm/arch includes to the 2.6.28 mach style"
+n=$(grep -rl 'asm/arch/' --include='*.c' --include='*.h' --include='*.S' . 2>/dev/null | wc -l | tr -d ' ')
+grep -rl 'asm/arch/' --include='*.c' --include='*.h' --include='*.S' . 2>/dev/null \
+  | xargs -r sed -i 's|asm/arch/|mach/|g'
+echo "    rewrote $n files"
+
+# Whole subsystems where the size comparison above already showed that
+# upstream took Nokia's work. jffs2 is the clear case: readinode.c is 1435
+# lines in Nokia's tree and 1438 in vanilla 2.6.28. Keeping Nokia's copy only
+# produces duplicate definitions.
+# THE RULE. Nokia shipped two very different kinds of change in one patch:
+#
+#   1. New files for hardware nobody else had -- the DSP Gateway, the cbus
+#      power drivers, the Blizzard framebuffer, the board files. These are
+#      pure additions. They apply with zero rejects and they are the whole
+#      point of the exercise.
+#
+#   2. Edits to shared core code -- jffs2, kernel/timer.c, the USB and
+#      bluetooth stacks. Nokia was a large upstream contributor, so 2.6.28
+#      usually ALREADY HAS these, and often a later version of them. Keeping
+#      Nokia's copy just produces duplicate definitions.
+#
+# So: keep category 1, take vanilla for category 2. Whack-a-mole on individual
+# files converges far more slowly than stating the rule once.
+echo "==> Reverting Nokia's core-kernel edits, keeping their hardware support"
+grep '^patching file' ../apply-2628.log 2>/dev/null \
+  | sed "s/^patching file //; s/^'//; s/'$//" | sort -u > ../patched-files.txt
+kept=0; reverted=0
+while IFS= read -r f; do
+  case "$f" in
+    # Where the N810's hardware lives -- keep Nokia's version.
+    arch/arm/plat-omap/*|arch/arm/mach-omap2/*|arch/arm/configs/*|\
+    drivers/cbus/*|drivers/video/omap/*|sound/arm/omap/*|\
+    arch/arm/tools/mach-types|arch/arm/include/asm/setup.h)
+      kept=$((kept+1)); continue ;;
+  esac
+  if [ -f "../vanilla-2.6.28/$f" ]; then
+    cp -a "../vanilla-2.6.28/$f" "$f"
+    reverted=$((reverted+1))
+  fi
+done < ../patched-files.txt
+echo "    kept Nokia's version:  $kept files (OMAP, cbus, video, sound, config)"
+echo "    reverted to vanilla:   $reverted files (shared core code)"
+
+# The mirror image of the restore above: files 2.6.28 DELETED that Nokia's
+# out-of-tree drivers still include. prcm-regs.h went away when 2.6.28 split
+# the PRCM registers into prm-*/cm-* headers, but the DSP Gateway still wants
+# it, so carry Nokia's copy forward.
+echo "==> Carrying forward headers 2.6.28 removed"
+for f in arch/arm/mach-omap2/prcm-regs.h; do
+  if [ ! -f "$f" ] && [ -f "../kernel-source-diablo/kernel-source/$f" ]; then
+    cp "../kernel-source-diablo/kernel-source/$f" "$f"
+    echo "    restored: $f"
+  fi
+done
+
+# 2.6.28 has its own mach/dsp_common.h -- the OMAP1 DSP header. Nokia's DSP
+# Gateway keeps a DIFFERENT file with the same basename, holding
+# struct dsp_platform_data, so plat-omap/devices.c must include theirs too.
+echo "==> Wiring plat-omap/devices.c to the DSP Gateway header"
+python3 - <<'PYY'
+p = 'arch/arm/plat-omap/devices.c'
+s = open(p).read()
+marker = '#if	defined(CONFIG_OMAP_DSP) || defined(CONFIG_OMAP_DSP_MODULE)'
+if marker not in s:
+    marker = '#if defined(CONFIG_OMAP_DSP) || defined(CONFIG_OMAP_DSP_MODULE)'
+if marker in s and 'dsp/dsp_common.h' not in s:
+    s = s.replace(marker, marker + '\n#include "dsp/dsp_common.h"', 1)
+    open(p, 'w').write(s)
+    print('    added #include "dsp/dsp_common.h"')
+else:
+    print('    SKIP (marker absent or already wired)')
+PYY
+
 echo "==> Fixing what a 2026 host breaks"
 python3 - <<'PY'
 # GNU Make 4.3 refuses a rule that mixes a normal target with a pattern
@@ -125,7 +250,44 @@ s = s.replace("""/ %/: prepare scripts FORCE""",
 %/: prepare scripts FORCE""", 1)
 open(p,'w').write(s)
 print("    Makefile: split 2 mixed rules for make >= 4.3")
+
+# When a directory has no objects, 2.6.28 makes built-in.o an EMPTY ar
+# archive -- literally the 8 bytes "!<arch>\n". binutils 2.29 cannot derive a
+# machine from that, and the final link dies with
+#
+#   arm-linux-gnueabi-ld: no machine record defined
+#
+# which names neither the file nor the cause. Three directories hit it here:
+# arch/arm/common, arch/arm/lib and firmware. Emit an empty ELF object
+# instead, which is what later kernels settled on.
+p = 'scripts/Makefile.build'; s = open(p).read()
+old = 'rm -f $@; $(AR) rcs $@)'
+new = 'rm -f $@; $(CC) $(KBUILD_CFLAGS) -c -x c /dev/null -o $@)'
+if old in s:
+    open(p, 'w').write(s.replace(old, new, 1))
+    print("    Makefile.build: empty built-in.o is now an ELF object, not an empty archive")
+else:
+    print("    SKIP (empty built-in.o rule already changed)")
 PY
+
+# kernel/timeconst.pl uses `defined(@array)`, which Perl removed in 5.22.
+# It fails with exit 255 and a message that does not name Perl as the cause.
+echo "==> Fixing timeconst.pl for modern Perl"
+python3 - <<'PYY'
+import re
+p = 'kernel/timeconst.pl'
+try:
+    s = open(p).read()
+except IOError:
+    print('    SKIP (no timeconst.pl)'); raise SystemExit
+n = s
+n = re.sub(r'defined\(@\$?(\w+)\)', r'@\1', n)
+if n != s:
+    open(p, 'w').write(n)
+    print('    removed defined(@array), which Perl 5.22 dropped')
+else:
+    print('    SKIP (already fine)')
+PYY
 
 echo "==> Reconciling Nokia's Kconfig against 2.6.28"
 python3 - <<'PY'
@@ -183,8 +345,66 @@ PY
 echo "==> Generating Nokia's board config on the 2.6.28 tree"
 make ARCH=arm nokia_2420_defconfig > ../defconfig.log 2>&1 || {
   echo "    FAILED -- see $WORK/defconfig.log"; tail -12 ../defconfig.log; exit 1; }
+# The DSP Gateway is the one Nokia subsystem that does NOT port mechanically.
+# It reaches straight into the 2.6.21 PRCM register layout (prcm-regs.h,
+# __REG32, OMAP24XX_PRCM_BASE), and 2.6.28 replaced all of that with the
+# prm/cm API. Porting it means rewriting the DSP's PRCM access, which is real
+# work and should not block a first bootable kernel.
+#
+# So the default build leaves it out. Set WITH_DSP=1 to keep it in and take on
+# that port.
+if [ "${WITH_DSP:-0}" != "1" ]; then
+  echo "==> Disabling CONFIG_OMAP_DSP for the first build (WITH_DSP=1 to keep it)"
+  sed -i 's/^CONFIG_OMAP_DSP=y/# CONFIG_OMAP_DSP is not set/' .config
+  sed -i '/^CONFIG_OMAP_DSP_/d' .config
+  yes "" | make ARCH=arm oldconfig > ../oldconfig.log 2>&1 || true
+fi
+
 echo "    .config written: $(wc -l < .config | tr -d ' ') lines"
 grep -E '^CONFIG_(ARCH_OMAP2420|OMAP_DSP|MACH_NOKIA_N800)=' .config | sed 's/^/      /' || true
+
+echo "==> Fetching a period cross compiler"
+# GCC 13 cannot build a 2008 kernel. It dies first on GNU89 inline semantics
+# (multiple definition of tty_kref_get), then on a cast-as-lvalue that GCC 4.0
+# removed, then on assembler syntax. Rather than fight each one, use a
+# compiler from the era: kernel.org publishes prebuilt crosstools exactly for
+# building old kernels, and 4.9.4 is the oldest they offer for an arm64 host.
+case "$(uname -m)" in
+  aarch64|arm64) CTHOST=arm64 ;;
+  x86_64|amd64)  CTHOST=x86_64 ;;
+  *) echo "no kernel.org crosstool for $(uname -m)"; exit 1 ;;
+esac
+CT="$WORK/gcc-4.9.4-nolibc"
+if [ ! -d "$CT" ]; then
+  ( cd "$WORK" && curl -fsSL --retry 3 -O \
+      "https://mirrors.edge.kernel.org/pub/tools/crosstool/files/bin/$CTHOST/4.9.4/$CTHOST-gcc-4.9.4-nolibc-arm-linux-gnueabi.tar.xz" \
+    && tar xf "$CTHOST-gcc-4.9.4-nolibc-arm-linux-gnueabi.tar.xz" )
+fi
+export PATH="$CT/arm-linux-gnueabi/bin:$PATH"
+
+# That 2016 toolchain wants libmpfr.so.4, which no current distribution ships.
+# Debian stretch is the last release that had it, and its archive is still up.
+if [ ! -f "$CT/extra-lib/libmpfr.so.4" ]; then
+  mkdir -p "$CT/extra-lib" && cd /tmp
+  curl -fsSL --retry 2 -o m.deb \
+    http://archive.debian.org/debian/pool/main/m/mpfr4/libmpfr4_3.1.5-1_${CTHOST/x86_64/amd64}.deb 2>/dev/null \
+    || curl -fsSL --retry 2 -o m.deb \
+       http://archive.debian.org/debian/pool/main/m/mpfr4/libmpfr4_3.1.5-1_arm64.deb
+  ar x m.deb && tar xf data.tar.xz && cp -a usr/lib/*/libmpfr.so.4* "$CT/extra-lib/"
+  cd "$WORK/linux-2.6.28"
+fi
+export LD_LIBRARY_PATH="$CT/extra-lib:${LD_LIBRARY_PATH:-}"
+arm-linux-gnueabi-gcc --version | head -1 | sed 's/^/    /'
+
+echo "==> Building zImage"
+cd "$WORK/linux-2.6.28"
+if make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- -j"$JOBS" zImage > ../build.log 2>&1; then
+  ls -la arch/arm/boot/zImage | sed 's/^/    /'
+  echo "    BUILT: $WORK/linux-2.6.28/arch/arm/boot/zImage"
+else
+  echo "    BUILD FAILED -- see $WORK/build.log"
+  grep -E 'error:|ld:|Error [0-9]' ../build.log | head -10 | sed 's/^/      /'
+fi
 
 cat <<'NEXT'
 
