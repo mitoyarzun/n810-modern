@@ -372,10 +372,51 @@ arch/arm/plat-omap/fb.c    79          344    342
 Check each reject against vanilla 2.6.28 **before** porting it. The usual
 right answer is to drop it.
 
-Still missing: a compiled `zImage`. A 2.6.28 tree does not build with GCC 13,
-so this needs a 4.x-era cross compiler. The flashing mechanism is known to
-work and to keep Maemo -- Diablo-Turbo did it in 2011 with
-`fiasco-flasher -f -k zImage`.
+**It compiles, and it links.** With `omap_generic_2420_defconfig` the rebased
+tree builds a **760,952 byte zImage**. With `nokia_2420_defconfig` the final
+link still fails; that is the open item.
+
+Getting there needed a period compiler. GCC 13 cannot build a 2008 kernel: it
+dies on GNU89 inline semantics, then a cast-as-lvalue that GCC 4.0 removed,
+then assembler syntax. kernel.org publishes prebuilt crosstools for exactly
+this job, and 4.9.4 is the oldest for an arm64 host, so it runs natively on
+Apple silicon.
+
+### The trap worth knowing
+
+**2.6.28 moved the ARM headers.**
+
+```
+include/asm-arm/           -> arch/arm/include/asm/
+include/asm-arm/arch-omap/ -> arch/arm/plat-omap/include/mach/
+```
+
+56 of the 638 files in Nokia's delta live under the old paths, and 50 of those
+are the OMAP headers -- `blizzard.h`, `board-nokia.h`, `aic23.h`. Patching them
+at the old path **succeeds and then does nothing**, because the build never
+reads that directory. No error, no reject. The failure surfaces much later as
+a missing `ATAG_BOARD` in a different file.
+
+Four more are pure 2026-host problems: GNU Make 4.3 rejects the old mixed
+implicit rules; `kernel/timeconst.pl` uses `defined(@array)`, which Perl 5.22
+removed; and empty `built-in.o` files are empty `ar` archives, which binutils
+2.29 cannot derive a machine from -- it says `no machine record defined` and
+names no file.
+
+### The rule that made it converge
+
+Fixing files one at a time was slow. Stating the rule once was not:
+
+> Keep Nokia's changes where the hardware lives -- `plat-omap`, `mach-omap2`,
+> `cbus`, `video/omap`, `sound/arm/omap`, their configs. Take vanilla 2.6.28
+> everywhere else.
+
+Nokia was a large upstream contributor, so their core-kernel edits are usually
+already in 2.6.28, and keeping them only duplicates definitions. That one rule
+took the build from 270 files to 752.
+
+The flashing mechanism is known to work and to keep Maemo -- Diablo-Turbo did
+it in 2011 with `fiasco-flasher -f -k zImage`.
 
 **Aim at 2.6.28 first.** It is about 18 months of kernel churn, not eighteen
 years. It keeps the display, keeps the DSP for a short forward-port, swaps
