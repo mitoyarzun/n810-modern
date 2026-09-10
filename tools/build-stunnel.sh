@@ -9,7 +9,7 @@
 # without rebuilding that application. One package, every consumer.
 #
 # Installs into ./out alongside OpenSSL, laid out as it will sit on the device
-# under /opt/handshake.
+# under /opt/n810-modern.
 set -euo pipefail
 
 VERSION="${STUNNEL_VERSION:-5.80}"
@@ -18,7 +18,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK="${WORK:-$PWD/build}"
 OUT="${OUT:-$PWD/out}"
 JOBS="${JOBS:-$(nproc)}"
-SSLDIR="$OUT/opt/handshake"
+SSLDIR="$OUT/opt/n810-modern"
 
 # shellcheck source=env.sh
 . "$HERE/env.sh" "${DIABLO_SYSROOT:-$PWD/sysroot-diablo}"
@@ -52,9 +52,9 @@ echo "==> Configuring"
 # a property of the target rather than a preference.
 ./configure \
   --host=arm-linux-gnueabi \
-  --prefix=/opt/handshake \
-  --sysconfdir=/opt/handshake/etc \
-  --localstatedir=/opt/handshake/var \
+  --prefix=/opt/n810-modern \
+  --sysconfdir=/opt/n810-modern/etc \
+  --localstatedir=/opt/n810-modern/var \
   --with-ssl="$SSLDIR" \
   --disable-systemd \
   --disable-libwrap \
@@ -69,16 +69,16 @@ echo "==> Staging into $OUT"
 make DESTDIR="$OUT" install
 
 echo "==> Stripping"
-find "$OUT/opt/handshake" -type f -name 'stunnel*' -print0 |
+find "$OUT/opt/n810-modern" -type f -name 'stunnel*' -print0 |
   while IFS= read -r -d '' f; do
     file "$f" | grep -q 'ELF 32-bit.*ARM' && "$STRIP" --strip-unneeded "$f" || true
   done
 
 echo "==> Verifying"
-mapfile -t artefacts < <(find "$OUT/opt/handshake" -type f -name 'stunnel*' |
+mapfile -t artefacts < <(find "$OUT/opt/n810-modern" -type f -name 'stunnel*' |
                          xargs -r file | grep 'ELF 32-bit.*ARM' | cut -d: -f1 | sort)
 [ ${#artefacts[@]} -gt 0 ] || { echo "no ARM binaries were built"; exit 1; }
-EXTRA_LIBDIR="$OUT/opt/handshake/lib" "$HERE/check-artifact.sh" "${artefacts[@]}"
+EXTRA_LIBDIR="$OUT/opt/n810-modern/lib" "$HERE/check-artifact.sh" "${artefacts[@]}"
 
 cat <<INFO
 

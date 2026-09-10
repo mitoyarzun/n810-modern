@@ -261,6 +261,53 @@ CPU gate completely.
 That is a limit of the emulator, not of the device. Audio work waits for
 hardware.
 
+## The kernel: backport, don't upgrade
+
+Two routes were built and measured. **The backport wins**, and the 2.6.28 work
+is kept for what it taught rather than what it produced.
+
+`tools/mk-kernel-2621-backport.sh` takes Nokia's own Diablo kernel and adds the
+syscalls modern userspace needs. Measured on the real kernel under emulation,
+before and after:
+
+| | stock 2.6.21 | backported |
+| --- | --- | --- |
+| `futex WAIT_PRIVATE` | ENOSYS | **present** |
+| `epoll_create1` | ENOSYS | **present** |
+| `pipe2` | ENOSYS | **present** |
+| `accept4` | ENOSYS | **present** |
+| `eventfd2` | ENOSYS | still absent — needs `anon_inodes` |
+| `getrandom` | ENOSYS | absent (3.17; callers use `/dev/urandom`) |
+
+And it keeps everything, which is the point:
+
+```
+omap_dsp_init() done
+dsp dsp: OMAP DSP driver initialization
+Menelaus rev 2.2
+Tahvo/Betty driver initialising
+Retu/Vilma driver initialising
+omapfb: Framebuffer initialized
+```
+
+It boots to the Hildon desktop with `CONFIG_OMAP_DSP`, `CONFIG_MMC_OMAP`,
+`CONFIG_MACH_OMAP2420_DVFS` and `CONFIG_CBUS` all enabled — the four things the
+2.6.28 route had to give up.
+
+**Why the backport is small.** Private futexes are an optimisation, not a
+semantic: 2.6.22's whole mechanism is skipping `mmap_sem` for a
+process-local futex. 2.6.21 always takes it, which is correct for both cases,
+so masking the flag off and running the existing path works. The mask belongs
+in `sys_futex()`, which compares the raw op in three places, not in
+`do_futex()`. The other four syscalls are the flag-taking forms of calls that
+already exist. See `tools/backport-syscalls.py`, including the caveat that the
+wrappers reintroduce the `O_CLOEXEC` race those syscalls were invented to
+close.
+
+**What it still does not buy.** Go's floor is 2.6.32, and 3.2 from Go 1.24.
+These syscalls are necessary, not proven sufficient — whether Go actually runs
+is the next experiment, and `eventfd` is the likely next blocker.
+
 ## Upgrading the kernel
 
 Every "no" above traces back to Linux 2.6.21. That gate is the only one you
@@ -339,6 +386,183 @@ open driver can sit under an unmodified Maemo.
 | **2.6.28-2.6.31** | every syscall that blocks modern C: `FUTEX_WAIT_PRIVATE` (2.6.22), `epoll_create1`, `eventfd2`, `pipe2` (2.6.27), `accept4` (2.6.28) | low — omapfb v1 still has `blizzard.c`, and the Nokia drivers still fit the era's APIs |
 | **2.6.38** | as above; [ssvb/linux-n810](https://github.com/ssvb/linux-n810) proves the hardware runs here | medium — omapfb gives way to DSS2, and platform code churns |
 | **3.2+** | Go 1.24, so Tailscale runs on the device | high — this is where keeping Diablo starts to fight you |
+
+**This is now started, not theory.** `tools/mk-kernel-2628.sh` fetches Nokia's
+GPL kernel source, computes their delta against vanilla 2.6.21, applies it to
+2.6.28, and generates their board config on the result:
+
+```
+Computing the Nokia delta      638 files, 5.0M
+Applying it to 2.6.28          patched: 508 files   rejects: 173 files
+
+  arch/arm/plat-omap/dsp       10 .c files, 0 rejects
+  drivers/cbus                 10 .c files, 0 rejects
+  drivers/video/omap           21 .c files, 0 rejects
+  sound/arm/omap               12 .c files, 0 rejects
+
+.config written: 1804 lines
+  CONFIG_OMAP_DSP=y
+  CONFIG_ARCH_OMAP2420=y
+```
+
+**Every Nokia subsystem applies with zero rejects**, because they are new
+files rather than edits. The 173 rejects are all in shared core files, and
+most need no work at all -- Nokia was a large OMAP contributor, so 2.6.28
+already has their change:
+
+```
+file                       van-2.6.21  NOKIA  van-2.6.28
+fs/jffs2/readinode.c       1019        1435   1438
+arch/arm/plat-omap/fb.c    79          344    342
+```
+
+Check each reject against vanilla 2.6.28 **before** porting it. The usual
+right answer is to drop it.
+
+**It builds.** `tools/mk-kernel-2628.sh` produces a working ARM zImage from
+Nokia's own board config:
+
+```
+Linux version 2.6.28 (gcc version 4.9.4)
+arch/arm/boot/zImage: Linux kernel ARM boot executable zImage (little-endian)
+
+Nokia N800
+Nokia RX-44        <- the N810
+Nokia RX-48        <- N810 WiMAX
+
+stock 2.6.21: 1,536,640 bytes
+ours  2.6.28: 1,563,044 bytes
+```
+
+Within 2% of Nokia's own kernel, with the Blizzard framebuffer, the cbus retu
+and tahvo drivers, menelaus, tsc2301 and the TUSB6010 all compiled in.
+
+**It boots, and it reaches the desktop.** The rebased kernel runs the real
+Diablo userspace under QEMU -- Matchbox, Hildon Desktop, the lot -- on the
+N810 machine:
+
+```
+Linux version 2.6.28 (gcc version 4.9.4)
+Machine: Nokia RX-44
+omapfb: ls041y3 rev 8f LCD detected
+omapfb: s1d13745 LCD controller rev 1 initialized (CNF pins 3)
+VFS: Mounted root (jffs2 filesystem).
+Starting Matchbox window manager
+Starting Hildon Desktop
+```
+
+### The bug that kept the screen black
+
+Worth writing down, because the window it depends on is invisible on real
+hardware. `rfbi_transfer_area()` stored its completion callback *after*
+enabling the clocks and programming DISPC:
+
+```c
+BUG_ON(callback == NULL);
+rfbi_enable_clocks(1);                  /* can deliver a pending FRAMEDONE */
+omap_dispc_set_lcd_size(width, height); /* so can this */
+rfbi.lcdc_callback = callback;          /* only stored HERE */
+```
+
+On hardware a 384000-pixel transfer takes milliseconds, so the interrupt
+cannot beat the assignment. QEMU copies the whole frame and raises FRAMEDONE
+**synchronously, inside the MMIO write**. The completion arrived first,
+`rfbi_dma_callback()` found NULL, dropped it, and the blizzard request queue
+stalled permanently. Exactly one transfer ever ran, pushing the framebuffer as
+it looked at boot: black. Userspace was fine the whole time and never knew.
+
+Storing the callback before any register access fixes it. Measured over one
+boot:
+
+```
+                    transfers   completions        blizzard_sync
+before                      1   1 with NULL cb     2 ok, 9 timed out
+after                    1934   1934 delivered    11 ok, 0 timed out
+```
+
+Found by instrumenting QEMU's `omap_rfbi_transfer_start()` rather than the
+kernel -- the emulator was the cheaper place to ask, and it named the
+condition directly.
+
+Left out of this first kernel, and each one is a deliberate choice rather than
+an oversight:
+
+| | Why |
+| --- | --- |
+| `CONFIG_OMAP_DSP` | reaches into the 2.6.21 PRCM layout that 2.6.28 replaced. `WITH_DSP=1` keeps it in for whoever ports it |
+| `CONFIG_MACH_OMAP2420_DVFS` | needs `scale_freq.c`, which is not in Nokia's published delta |
+| USB sleep gating | `omap2_block_sleep()` was Nokia's, in the `pm.c` this rebase replaces. **Stubbed** -- the SoC may sleep during USB transfers |
+| Menelaus late-init | 2.6.28 passes platform data through the i2c client; this board code predates `I2C_BOARD_INFO`. **Stubbed** |
+
+Getting there needed a period compiler. GCC 13 cannot build a 2008 kernel: it
+dies on GNU89 inline semantics, then a cast-as-lvalue that GCC 4.0 removed,
+then assembler syntax. kernel.org publishes prebuilt crosstools for exactly
+this job, and 4.9.4 is the oldest for an arm64 host, so it runs natively on
+Apple silicon.
+
+### The trap worth knowing
+
+**2.6.28 moved the ARM headers.**
+
+```
+include/asm-arm/           -> arch/arm/include/asm/
+include/asm-arm/arch-omap/ -> arch/arm/plat-omap/include/mach/
+```
+
+56 of the 638 files in Nokia's delta live under the old paths, and 50 of those
+are the OMAP headers -- `blizzard.h`, `board-nokia.h`, `aic23.h`. Patching them
+at the old path **succeeds and then does nothing**, because the build never
+reads that directory. No error, no reject. The failure surfaces much later as
+a missing `ATAG_BOARD` in a different file.
+
+Four more are pure 2026-host problems: GNU Make 4.3 rejects the old mixed
+implicit rules; `kernel/timeconst.pl` uses `defined(@array)`, which Perl 5.22
+removed; and empty `built-in.o` files are empty `ar` archives, which binutils
+2.29 cannot derive a machine from -- it says `no machine record defined` and
+names no file.
+
+### The failure that repeats
+
+One shape accounted for most of the work, and it is worth stating on its own:
+
+> Nokia's **source files** all apply cleanly, because they are new files.
+> What rejects, every time, is the line that **wires** a file into the build --
+> an `obj-y` in a Makefile, a `source` in a Kconfig -- because 2.6.28 rewrote
+> those files around them.
+
+The result is a tree that looks complete and a kernel that is missing the
+driver, with no error until much later. The worst instance: all twelve board
+sources applied, but the `mach-omap2/Kconfig` and `Makefile` hunks rejected, so
+`CONFIG_MACH_NOKIA_*` named symbols no Kconfig declared. kconfig drops unknown
+options silently, nothing built the board files, and the kernel ended up with
+**no `MACHINE_START` at all**. The final link then said:
+
+```
+arm-linux-gnueabi-ld: no machine record defined
+```
+
+which is, read literally, exactly right -- and names nothing. It cost a config
+bisect over 911 options to find, and the answer was
+`# CONFIG_MACH_OMAP_GENERIC is not set`.
+
+A related one: ARM does not source `drivers/Kconfig`. `arch/arm/Kconfig`
+sources 48 driver Kconfigs itself. Adding `drivers/cbus` to `drivers/Kconfig`
+looks right, changes nothing, and surfaces as an undefined symbol.
+
+### The rule that made it converge
+
+Fixing files one at a time was slow. Stating the rule once was not:
+
+> Keep Nokia's changes where the hardware lives -- `plat-omap`, `mach-omap2`,
+> `cbus`, `video/omap`, `sound/arm/omap`, their configs. Take vanilla 2.6.28
+> everywhere else.
+
+Nokia was a large upstream contributor, so their core-kernel edits are usually
+already in 2.6.28, and keeping them only duplicates definitions. That one rule
+took the build from 270 files to 752.
+
+The flashing mechanism is known to work and to keep Maemo -- Diablo-Turbo did
+it in 2011 with `fiasco-flasher -f -k zImage`.
 
 **Aim at 2.6.28 first.** It is about 18 months of kernel churn, not eighteen
 years. It keeps the display, keeps the DSP for a short forward-port, swaps

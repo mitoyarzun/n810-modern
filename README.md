@@ -16,6 +16,76 @@ This does not make the modern web work — nothing here renders a 2026 site. It
 buys package repositories, `git`, mail, IRC, RSS, and anything networked you
 write yourself.
 
+> **None of this has run on physical hardware.** Everything is verified under
+> emulation: the packages install with the device's own dpkg, the TLS stack
+> completes real TLS 1.3 handshakes and rejects bad certificates, and the
+> kernel boots Maemo to the Hildon desktop. But QEMU's `n810` machine models
+> no WiFi, no battery and no real timings, so WiFi, charging, power management
+> and performance are all untested. Treat the kernel package in particular as
+> a proof of concept: flashing is reversible and the helper backs up your
+> running kernel first, but it is still a flash.
+
+## Install it on the device
+
+You do not need to build any of this, and you only install **one** package by
+hand. Download it on a PC, copy it across by SD card or USB mass storage --
+neither needs anything on the tablet -- then as root:
+
+```sh
+dpkg -i n810-modern-tls_1.0_armel.deb
+```
+
+That is the whole manual step. It has to be manual because a stock device
+cannot complete a modern TLS handshake, so it cannot download anything. The
+package brings OpenSSL 3.5, zlib, curl, stunnel and a current CA store:
+
+```sh
+export LD_LIBRARY_PATH=/opt/n810-modern/lib
+/opt/n810-modern/bin/curl https://example.org/
+```
+
+Everything lands in `/opt/n810-modern`, alongside the stock libraries rather than
+over them. Nothing already on the device changes, and `dpkg -r` removes it
+cleanly.
+
+| Package | Size | Contents |
+| --- | --- | --- |
+| `n810-modern-tls` | 3.2 MB | OpenSSL 3.5.8, zlib 1.3.2, curl 8.22.0, stunnel 5.80, current CA store |
+| `n810-modern-ssh` | 3.2 MB | OpenSSH 10.5p1 (`Depends:` the above) |
+| `n810-modern-tls-dev` | 3.8 MB | headers and link libraries, only needed to compile against them |
+| `n810-modern-kernel` | 1.5 MB | 2.6.21 with backported syscalls. **Installing does not flash**; run `n810-modern-flash-kernel` deliberately |
+
+Verified by installing them on the real Diablo userland under emulation, with
+the device's own dpkg 1.14.7maemo5 (`tools/deb-smoke.sh`).
+
+### After the first one, it updates itself
+
+`n810-modern-tls` also installs `n810-modern-update`, which fetches everything
+else over TLS 1.3:
+
+```sh
+n810-modern-update                          # what is available
+n810-modern-update install n810-modern-ssh
+n810-modern-update upgrade
+```
+
+Only the first package has to arrive by hand, because a stock device cannot
+complete a modern handshake to download anything. Once it is installed the
+device has curl with a current CA store, and the rest is one command.
+
+**`apt` cannot do this**, which is worth knowing before you try: apt's
+transport methods link against the system OpenSSL 0.9.8, not the copy under
+`/opt/n810-modern`, so apt still cannot reach an HTTPS host after installing
+this. Pointing apt at the repository would need an `/etc/hosts` hijack and a
+hardcoded GitHub IP fronted by stunnel. The updater avoids all of that.
+
+Authenticity comes from the TLS connection: certificates are verified against
+the shipped CA store, so there is no GPG keyring to manage and no 2008-era
+`gpgv` compatibility to worry about. The SHA-256 in the index catches
+truncation and corruption, not a hostile server.
+
+## Building it yourself
+
 ## Quickstart
 
 **Docker is required, not a convenience.** The build unpacks 2008 Debian
@@ -41,8 +111,8 @@ tools/build-in-docker.sh
 Fetches a Diablo sysroot from the community mirrors, cross-compiles OpenSSL
 3.5.8 and stunnel 5.80, installs a current CA store, and runs both test suites
 against the device's own glibc 2.5 under QEMU — including a real TLS 1.3
-handshake. Result: `dist/handshake-diablo-armel.tar.gz`, 5.3 MB, unpacks to
-`/opt/handshake` on the device.
+handshake. Result: `dist/n810-modern-diablo-armel.tar.gz`, 5.3 MB, unpacks to
+`/opt/n810-modern` on the device.
 
 | Host | Clean build |
 | --- | --- |
@@ -167,9 +237,9 @@ that control the menus, the panels and the status bar.
 ### On the device
 
 ```sh
-tar xzf handshake-diablo-armel.tar.gz -C /opt
-export LD_LIBRARY_PATH=/opt/handshake/lib
-/opt/handshake/bin/openssl version -a
+tar xzf n810-modern-diablo-armel.tar.gz -C /opt
+export LD_LIBRARY_PATH=/opt/n810-modern/lib
+/opt/n810-modern/bin/openssl version -a
 ```
 
 A stock device has no `openssl` CLI, no `wget`, no `curl` and no Python — only
@@ -178,7 +248,7 @@ storage needs nothing installed.
 
 ## Status
 
-Four packages in `/opt/handshake`, all alongside the stock libraries rather
+Four packages in `/opt/n810-modern`, all alongside the stock libraries rather
 than over them:
 
 | | |
@@ -230,6 +300,13 @@ qemu-curl-test.sh       fetch a page; confirm a bad certificate is refused
 mk-diablo-emulator.sh   fetch and unpack the real firmware
 emulator-smoke.sh       run it on the real 2.6.21 kernel
 probe-kernel.sh         ask that kernel what it supports (TUN, audio, iptables)
+mk-kernel-2621-backport.sh  Nokia's own kernel, plus the syscalls it lacks
+backport-syscalls.py    the futex/epoll_create1/pipe2/accept4 patches
+mk-kernel-2628.sh       rebase Nokia's Diablo patches onto vanilla 2.6.28
+mk-debs.sh              package the build as installable .deb files
+deb-smoke.sh            install those packages on the device's own dpkg
+mk-pages-repo.sh        build the static tree GitHub Pages serves
+update-smoke.sh         fetch and verify a package with the device's own curl
 emulator-gui-build.sh   build an image that reaches the desktop
 emulator-gui.sh         boot that, over VNC
 fb-autoupdate.c         forces the panel to refresh; built for the guest

@@ -63,9 +63,9 @@ SYSROOT_FLAGS="--sysroot=$DIABLO_SYSROOT -B$DIABLO_SYSROOT/usr/lib"
 # header installed two directories away.
 #
 # So the staging prefix goes first in the -isystem chain, here, once.
-HANDSHAKE_STAGE="${HANDSHAKE_STAGE:-$PWD/out/opt/handshake}"
+N810_STAGE="${N810_STAGE:-$PWD/out/opt/n810-modern}"
 STAGE_INCLUDE=""
-[ -d "$HANDSHAKE_STAGE/include" ] && STAGE_INCLUDE="-isystem $HANDSHAKE_STAGE/include"
+[ -d "$N810_STAGE/include" ] && STAGE_INCLUDE="-isystem $N810_STAGE/include"
 INCLUDE_FLAGS="-nostdinc -isystem $GCC_INTERNAL_INCLUDE $STAGE_INCLUDE -isystem $DIABLO_SYSROOT/usr/include"
 
 # Ubuntu 24.04 ships its 32-bit cross-compilers with the 64-bit time_t / large
@@ -99,31 +99,31 @@ export LD="$TARGET-ld"
 export CFLAGS="-O2 -pipe"
 # Match the include ordering: our staged libraries before the sysroot's.
 STAGE_LIB=""
-[ -d "$HANDSHAKE_STAGE/lib" ] && STAGE_LIB="-L$HANDSHAKE_STAGE/lib"
+[ -d "$N810_STAGE/lib" ] && STAGE_LIB="-L$N810_STAGE/lib"
 
 # Where built artefacts land on the device. Deliberately NOT /usr: the whole
 # point is to sit alongside the stock OpenSSL 0.9.8e, never on top of it. Also
 # keeps several MB off the 256 MB rootfs -- mount or symlink this from the
 # 2 GB internal flash.
-export HANDSHAKE_PREFIX="${HANDSHAKE_PREFIX:-/opt/handshake}"
+export N810_PREFIX="${N810_PREFIX:-/opt/n810-modern}"
 
 # -rpath is the ON-DEVICE path, not the staging one. Without it every binary
 # we ship needs LD_LIBRARY_PATH set by hand before it will start:
 #     ./curl: error while loading shared libraries: libssl.so.3:
 #     cannot open shared object file: No such file or directory
-# /opt/handshake/lib is not in the device's default search path and we
+# /opt/n810-modern/lib is not in the device's default search path and we
 # deliberately do not touch /etc/ld.so.conf -- the rule everywhere here is to
 # coexist with the stock system, never modify it. Baking the path into the
 # binaries keeps that promise and still makes them run straight out of the
 # tarball. glibc 2.5 honours DT_RPATH.
-export LDFLAGS="-Wl,-z,noexecstack $STAGE_LIB -Wl,-rpath,$HANDSHAKE_PREFIX/lib"
+export LDFLAGS="-Wl,-z,noexecstack $STAGE_LIB -Wl,-rpath,$N810_PREFIX/lib"
 
 
 echo "diablo cross-env ready"
 echo "  sysroot   $DIABLO_SYSROOT (glibc 2.5, headers 2.6.16)"
 echo "  target    $TARGET (armv6, softfp, ld-linux.so.3)"
-echo "  prefix    $HANDSHAKE_PREFIX (on-device)"
-[ -n "$STAGE_INCLUDE" ] && echo "  staged    $HANDSHAKE_STAGE (our headers precede the sysroot's)"
+echo "  prefix    $N810_PREFIX (on-device)"
+[ -n "$STAGE_INCLUDE" ] && echo "  staged    $N810_STAGE (our headers precede the sysroot's)"
 
 # Always succeed. A sourced file returns the status of its last command, and
 # the conditional echo above is false whenever nothing is staged yet -- which

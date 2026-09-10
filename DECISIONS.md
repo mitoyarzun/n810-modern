@@ -60,7 +60,7 @@ beat. Nothing here has been tested on hardware yet — see [README.md](README.md
 | --- | --- | --- | --- |
 | 1 | **Fix TLS, nothing else.** No distro port, no kernel work, no UI | It is the one dependency under every other useful thing the device could do. Everything else on the N810 is optional; this is not | Bundling it into a wider "modernise the N810" effort |
 | 2 | **Coexist, never replace.** New library installs alongside `libssl0.9.8` | Different sonames make this free. The device must stay bootable and usable at every single step — there is no recovery story worth having on 2008 hardware | Upgrading the system OpenSSL in place |
-| 3 | **Install under `/opt/handshake`, not `/usr`** | Keeps the stock system pristine, and keeps several MB off a 256 MB rootfs | `/usr/local`; overwriting `/usr` |
+| 3 | **Install under `/opt/n810-modern`, not `/usr`** | Keeps the stock system pristine, and keeps several MB off a 256 MB rootfs | `/usr/local`; overwriting `/usr` |
 | 4 | **The browser is explicitly out of scope** | MicroB is Gecko 1.9 on NSS; modern NSS needs C++11 and gyp/ninja, and old Gecko calls APIs NSS has removed. The N900 community had more people and never managed it | Attempting an NSS drop-in; patching MicroB |
 | 5 | **NetSurf, if a browser is ever wanted** | Small, maintained, C, already uses libcurl + OpenSSL — it falls out of the consumer work almost free | Porting a modern Gecko or WebKit |
 

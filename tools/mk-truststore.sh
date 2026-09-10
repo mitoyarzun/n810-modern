@@ -17,7 +17,7 @@
 set -euo pipefail
 
 OUT="${1:-$PWD/out}"
-PREFIX="$OUT/opt/handshake"
+PREFIX="$OUT/opt/n810-modern"
 URL="https://curl.se/ca/cacert.pem"
 SHA_URL="https://curl.se/ca/cacert.pem.sha256"
 
@@ -48,7 +48,7 @@ echo "    installed  $PREFIX/ssl/cert.pem"
 echo "    roots      $roots"
 echo "    size       $(du -h "$PREFIX/ssl/cert.pem" | cut -f1)"
 echo
-echo "On the device this lands at /opt/handshake/ssl/cert.pem, which is the"
+echo "On the device this lands at /opt/n810-modern/ssl/cert.pem, which is the"
 echo "OPENSSLDIR compiled into the library, so nothing needs configuring."
 echo
 echo "Verify with:  tools/qemu-smoke.sh   (section 4 must report no verify error)"

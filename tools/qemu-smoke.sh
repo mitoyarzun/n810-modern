@@ -20,7 +20,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT="${1:-$PWD/out}"
 SYSROOT="${2:-${DIABLO_SYSROOT:-$PWD/sysroot-diablo}}"
-PREFIX="$OUT/opt/handshake"
+PREFIX="$OUT/opt/n810-modern"
 rc=0
 
 command -v qemu-arm >/dev/null || { echo "qemu-arm not found -- apt install qemu-user"; exit 1; }
@@ -31,7 +31,7 @@ command -v qemu-arm >/dev/null || { echo "qemu-arm not found -- apt install qemu
 # libc.so.6 and friends from glibc 2.5 exactly as the tablet would.
 #
 # OPENSSL_MODULES and OPENSSL_CONF are redirected because the library was built
-# with absolute device paths (/opt/handshake/...) baked in, which is correct for
+# with absolute device paths (/opt/n810-modern/...) baked in, which is correct for
 # the tablet and wrong for a build host where the tree sits under ./out. Without
 # them the legacy provider fails to load here and looks like a build fault:
 #     legacy.so: cannot open shared object file: No such file or directory

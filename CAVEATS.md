@@ -17,6 +17,22 @@ The named file is a symlink and a red herring — creating it by hand works.
 refusing. `tools/build-in-docker.sh` keeps the tree in a Docker volume for this
 reason. Do not "simplify" it back to `-v $PWD:/work`.
 
+**`/work/tools` in the build volume outlives the checkout.** The volume
+persists between runs, so anything that executes scripts from `/work/tools`
+without refreshing them first can be running a copy that is months old.
+`tools/build-in-docker.sh` does refresh it:
+
+```sh
+mkdir -p /work/tools && cp -a /src/tools/. /work/tools/
+```
+
+but anything invoking the volume directly does not, and the failure is silent
+in the worst way: an old script ignores a variable it has never heard of and
+produces a perfectly good image of the unmodified firmware. A test that then
+checks that image passes while verifying nothing. This cost one twelve-minute
+boot to notice. If a script depends on a feature, grep the copy you are about
+to run for it rather than assuming.
+
 **`set -o pipefail` plus `grep -q` makes a check that cannot fail.** `grep -q`
 exits at the first match, the producer dies of SIGPIPE, and the pipeline
 returns 141:

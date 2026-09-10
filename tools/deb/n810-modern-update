@@ -1,0 +1,141 @@
+#!/bin/sh
+# Fetch and install n810-modern packages over HTTPS.
+#
+#   n810-modern-update              # list what is available
+#   n810-modern-update install NAME
+#   n810-modern-update upgrade      # everything already installed
+#
+# This ships no binaries. It drives /opt/n810-modern/bin/curl, which the
+# n810-modern-tls package already installed, and which can complete a modern
+# TLS handshake -- the device's own libraries cannot.
+#
+# WHY NOT apt. apt's transport methods link against the system OpenSSL 0.9.8,
+# not ours, so apt cannot fetch from an HTTPS host no matter what is installed
+# under /opt/n810-modern. Reaching a GitHub Pages repo from apt needs an
+# /etc/hosts hijack and a hardcoded GitHub IP; this is the simpler path.
+#
+# WHY NO GPG. The transport is real TLS 1.3 with certificate verification
+# against a current CA store, so authenticity comes from the connection.
+# Checksums below guard against a truncated or corrupted download, not against
+# a hostile server -- the certificate check is what does that.
+set -e
+
+BASE="${N810_MODERN_URL:-https://mitoyarzun.github.io/n810-modern}"
+PREFIX=/opt/n810-modern
+CURL="$PREFIX/bin/curl"
+OPENSSL="$PREFIX/bin/openssl"
+CACHE=/var/cache/n810-modern
+export LD_LIBRARY_PATH="$PREFIX/lib"
+
+# This script is shipped inside n810-modern-tls, so an upgrade can overwrite it
+# while it is running. /bin/sh reads a script lazily by byte offset, so the
+# rest of the file would come back as garbage. Re-exec from a copy first.
+case "$0" in
+	/tmp/.n810-update.*) ;;
+	*)
+		tmp=/tmp/.n810-update.$$
+		cat "$0" > "$tmp"
+		chmod 755 "$tmp"
+		exec "$tmp" "$@"
+		;;
+esac
+trap 'rm -f "$0"' EXIT
+
+die() { echo "$*" >&2; exit 1; }
+
+[ -x "$CURL" ] || die "$CURL not found -- install n810-modern-tls first"
+[ -x "$OPENSSL" ] || die "$OPENSSL not found -- install n810-modern-tls first"
+[ "$(id -u)" = 0 ] || die "run this as root"
+
+mkdir -p "$CACHE"
+
+fetch() {
+	# --fail so an HTML error page is never mistaken for a package.
+	"$CURL" -fsSL --retry 2 -o "$2" "$1"
+}
+
+echo "==> $BASE"
+INDEX="$CACHE/index"
+fetch "$BASE/index.txt" "$INDEX" || die "could not fetch the package index"
+
+installed_version() {
+	dpkg-query -W -f='${Version}' "$1" 2>/dev/null || true
+}
+
+# index.txt: name version size sha256 url
+list() {
+	while read -r name version size sha url; do
+		case "$name" in ''|'#'*) continue ;; esac
+		have=$(installed_version "$name")
+		if [ -z "$have" ]; then
+			state="not installed"
+		elif [ "$have" = "$version" ]; then
+			state="up to date"
+		else
+			state="installed $have"
+		fi
+		printf "  %-24s %-8s %s\n" "$name" "$version" "$state"
+	done < "$INDEX"
+}
+
+get_one() {
+	target="$1"
+	found=0
+	while read -r name version size sha url; do
+		case "$name" in ''|'#'*) continue ;; esac
+		[ "$name" = "$target" ] || continue
+		found=1
+		have=$(installed_version "$name")
+		if [ "$have" = "$version" ]; then
+			echo "    $name $version already installed"
+			return 0
+		fi
+		file=$(basename "$url")
+		echo "    fetching $file ($size bytes)"
+		# The packages live in a GitHub release, not next to the index, so
+		# the row carries an absolute URL. -L follows the redirect to the
+		# object store.
+		fetch "$url" "$CACHE/$file" || die "download failed: $url"
+
+		got=$("$OPENSSL" dgst -sha256 "$CACHE/$file" | sed 's/.*= *//')
+		[ "$got" = "$sha" ] || {
+			rm -f "$CACHE/$file"
+			die "checksum mismatch for $file
+  expected $sha
+  got      $got"
+		}
+		echo "    sha256 ok"
+		dpkg -i "$CACHE/$file"
+		rm -f "$CACHE/$file"
+	done < "$INDEX"
+	[ "$found" = 1 ] || die "no such package: $target"
+}
+
+case "${1:-list}" in
+	list)
+		list
+		echo
+		echo "n810-modern-update install NAME"
+		;;
+	install)
+		[ -n "${2:-}" ] || die "usage: n810-modern-update install NAME"
+		shift
+		for p in "$@"; do
+			echo "==> $p"
+			get_one "$p"
+		done
+		;;
+	upgrade)
+		while read -r name version size sha url; do
+			case "$name" in ''|'#'*) continue ;; esac
+			have=$(installed_version "$name")
+			[ -n "$have" ] || continue
+			[ "$have" = "$version" ] && continue
+			echo "==> $name $have -> $version"
+			get_one "$name"
+		done < "$INDEX"
+		;;
+	*)
+		die "usage: n810-modern-update [list|install NAME|upgrade]"
+		;;
+esac

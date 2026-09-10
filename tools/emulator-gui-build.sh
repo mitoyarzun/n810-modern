@@ -15,7 +15,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK="${1:-$PWD/emulator}"
 OUT="${2:-$PWD/out}"
-PREFIX="$OUT/opt/handshake"
+PREFIX="$OUT/opt/n810-modern"
 
 # Your own files, copied over the rootfs at the end of the build. See
 # gui-overlay.example/README.md. The step is skipped when the directory does
@@ -273,8 +273,8 @@ fi
 
 if [ -x "$PREFIX/bin/openssl" ]; then
   echo "==> Including $PREFIX"
-  rm -rf rootfs/opt/handshake && mkdir -p rootfs/opt
-  cp -a "$PREFIX" rootfs/opt/handshake
+  rm -rf rootfs/opt/n810-modern && mkdir -p rootfs/opt
+  cp -a "$PREFIX" rootfs/opt/n810-modern
 fi
 
 echo "==> 11. Applying the overlay"

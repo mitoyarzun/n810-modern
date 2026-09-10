@@ -31,7 +31,9 @@ qemu-system-arm -M help | grep -q '^n810' || {
   echo "this qemu has no n810 machine -- it was removed in 9.2; use 9.1 or earlier"; exit 1; }
 
 cd "$WORK"
-KERNEL=$(ls unpacked/kernel_* | head -1)
+# KERNEL_OVERRIDE lets this probe a kernel we built rather than the stock one,
+# which is how tools/mk-kernel-2621-backport.sh gets verified.
+KERNEL="${KERNEL_OVERRIDE:-$(ls unpacked/kernel_* | head -1)}"
 INITFS=$(ls unpacked/initfs_* | head -1)
 
 # A device node that exists but returns ENODEV proves nothing, so open it and

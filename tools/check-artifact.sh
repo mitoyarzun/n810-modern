@@ -131,9 +131,9 @@ for f in "$@"; do
   if [ "$ours" = 1 ]; then
     rpath=$($T-readelf -d "$f" 2>/dev/null | grep -oE '\(R(UN)?PATH\).*\[[^]]*\]' | grep -oE '\[[^]]*\]' | tr -d '[]')
     case "$rpath" in
-      */opt/handshake/lib*) echo "   ok    rpath $rpath" ;;
+      */opt/n810-modern/lib*) echo "   ok    rpath $rpath" ;;
       "")  echo "   FAIL  needs our libraries but has no RPATH; will not start without LD_LIBRARY_PATH"; bad=1 ;;
-      *)   echo "   FAIL  rpath is '$rpath', expected /opt/handshake/lib"; bad=1 ;;
+      *)   echo "   FAIL  rpath is '$rpath', expected /opt/n810-modern/lib"; bad=1 ;;
     esac
   fi
 

@@ -19,7 +19,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK="${WORK:-$PWD/build}"
 OUT="${OUT:-$PWD/out}"
 JOBS="${JOBS:-$(nproc)}"
-SSLDIR="$OUT/opt/handshake"
+SSLDIR="$OUT/opt/n810-modern"
 
 # shellcheck source=env.sh
 . "$HERE/env.sh" "${DIABLO_SYSROOT:-$PWD/sysroot-diablo}"
@@ -58,11 +58,11 @@ CC="$CC -I$SSLDIR/include" \
 LDFLAGS="$LDFLAGS -L$SSLDIR/lib" \
 ./configure \
   --host=arm-linux-gnueabi \
-  --prefix=/opt/handshake \
-  --sysconfdir=/opt/handshake/etc/ssh \
+  --prefix=/opt/n810-modern \
+  --sysconfdir=/opt/n810-modern/etc/ssh \
   --with-ssl-dir="$SSLDIR" \
   --with-zlib="$SSLDIR" \
-  --with-privsep-path=/opt/handshake/var/empty \
+  --with-privsep-path=/opt/n810-modern/var/empty \
   --with-sandbox=no \
   --without-pam \
   --disable-strip \
@@ -78,27 +78,27 @@ make DESTDIR="$OUT" install-nokeys
 echo "==> Stripping"
 for f in ssh sshd sshd-session sshd-auth scp sftp ssh-add ssh-agent ssh-keygen \
          ssh-keyscan sftp-server ssh-keysign; do
-  for p in "$OUT/opt/handshake/bin/$f" "$OUT/opt/handshake/sbin/$f" \
-           "$OUT/opt/handshake/libexec/$f"; do
+  for p in "$OUT/opt/n810-modern/bin/$f" "$OUT/opt/n810-modern/sbin/$f" \
+           "$OUT/opt/n810-modern/libexec/$f"; do
     [ -f "$p" ] || continue
     file "$p" | grep -q 'ELF 32-bit.*ARM' && "$STRIP" --strip-unneeded "$p" || true
   done
 done
 
 echo "==> Verifying"
-mapfile -t artefacts < <(find "$OUT/opt/handshake" -type f \
+mapfile -t artefacts < <(find "$OUT/opt/n810-modern" -type f \
   \( -name 'ssh' -o -name 'sshd' -o -name 'sshd-session' -o -name 'scp' \
      -o -name 'sftp' -o -name 'ssh-keygen' \) | sort)
 [ ${#artefacts[@]} -gt 0 ] || { echo "no ARM binaries were built"; exit 1; }
-EXTRA_LIBDIR="$OUT/opt/handshake/lib" "$HERE/check-artifact.sh" "${artefacts[@]}"
+EXTRA_LIBDIR="$OUT/opt/n810-modern/lib" "$HERE/check-artifact.sh" "${artefacts[@]}"
 
 cat <<INFO
 
 Built: ${artefacts[*]}
 
 Host keys are NOT generated here -- they must be made on the device, once:
-  /opt/handshake/bin/ssh-keygen -A -f /opt/handshake
+  /opt/n810-modern/bin/ssh-keygen -A -f /opt/n810-modern
 
 Then run the daemon:
-  /opt/handshake/sbin/sshd -f /opt/handshake/etc/ssh/sshd_config
+  /opt/n810-modern/sbin/sshd -f /opt/n810-modern/etc/ssh/sshd_config
 INFO
