@@ -525,6 +525,9 @@ python3 "$HERE/fix-n800-pm.py"
 python3 "$HERE/fix-build-wiring.py"
 python3 "$HERE/fix-retu-rtc.py"
 python3 "$HERE/fix-retu-headset.py"
+python3 "$HERE/fix-board-mapio.py"
+python3 "$HERE/fix-rfbi.py"
+python3 "$HERE/fix-blizzard-sync.py"
 
 echo "==> Generating Nokia's board config on the 2.6.28 tree"
 make ARCH=arm nokia_2420_defconfig > ../defconfig.log 2>&1 || {
@@ -542,6 +545,35 @@ if [ "${WITH_DSP:-0}" != "1" ]; then
   sed -i 's/^CONFIG_OMAP_DSP=y/# CONFIG_OMAP_DSP is not set/' .config
   sed -i '/^CONFIG_OMAP_DSP_/d' .config
   sed -i 's/^CONFIG_MACH_OMAP2420_DVFS=y/# CONFIG_MACH_OMAP2420_DVFS is not set/' .config
+  # n800_mmc_late_init() calls into menelaus, and menelaus never probes:
+  # 2.6.28 registers it as an i2c client with platform data, and this board
+  # code predates I2C_BOARD_INFO (see tools/fix-n800-pm.py). The result is a
+  # NULL deref in menelaus_set_slot_sel during mmc_omap_probe.
+  #
+  # The root filesystem is JFFS2 on OneNAND, not MMC, so the first kernel does
+  # not need this. Wiring menelaus up properly is what restores SD cards.
+  sed -i 's/^CONFIG_MMC_OMAP=y/# CONFIG_MMC_OMAP is not set/' .config
+fi
+
+# THE CONSOLE. Nokia's defconfig selects CONFIG_SERIAL_OMAP -- their own UART
+# driver, drivers/serial/omap.c -- and explicitly disables the 8250. But this
+# rebase takes 2.6.28's arch/arm/mach-omap2/serial.c, and that registers a
+# platform device named "serial8250". Nokia's driver is also unwired, like
+# everything else whose Kconfig line rejected, so CONFIG_SERIAL_OMAP is a
+# symbol kconfig has never heard of and the option is dropped in silence.
+#
+# The result is a kernel that boots perfectly and says nothing at all: no
+# console driver is ever bound to the UART. Match the serial.c we actually
+# have, and use the 8250.
+if true; then
+  echo "==> Switching the console to the 8250 driver, which 2.6.28's serial.c registers"
+  sed -i 's/^# CONFIG_SERIAL_8250 is not set/CONFIG_SERIAL_8250=y/' .config
+  grep -q '^CONFIG_SERIAL_8250=y' .config || echo 'CONFIG_SERIAL_8250=y' >> .config
+  cat >> .config <<'CFG'
+CONFIG_SERIAL_8250_CONSOLE=y
+CONFIG_SERIAL_8250_NR_UARTS=3
+CONFIG_SERIAL_8250_RUNTIME_UARTS=3
+CFG
   yes "" | make ARCH=arm oldconfig > ../oldconfig.log 2>&1 || true
 fi
 

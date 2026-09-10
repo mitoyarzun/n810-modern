@@ -30,6 +30,25 @@ APPENDS = [
     ('drivers/Makefile',
      'cbus/',
      'obj-$(CONFIG_CBUS)\t\t+= cbus/\n'),
+
+]
+
+# Not an append: this Makefile ends with
+#
+#     omapfb-objs := $(objs-yy)
+#
+# and `:=` is evaluated immediately, so a line added after it is collected into
+# nothing. The object must be added BEFORE that assignment. Appending looks
+# right, builds cleanly, and silently produces a kernel with no panel driver.
+INSERTS = [
+    # lcd_mipid.c drives the N810's ls041y3 panel. 2.6.28 ships the source but
+    # builds it for no board, so omapfb comes up with no panel, never
+    # initialises, and /dev/fb0 does not exist. Userspace then fails with
+    # "cannot open display" and the kernel says nothing at all about it.
+    ('drivers/video/omap/Makefile',
+     'lcd_mipid.o',
+     'omapfb-objs := $(objs-yy)',
+     'objs-y$(CONFIG_FB_OMAP_LCD_MIPID) += lcd_mipid.o\n\nomapfb-objs := $(objs-yy)'),
 ]
 
 # ARM does NOT source drivers/Kconfig. arch/arm/Kconfig sources each driver
@@ -41,6 +60,19 @@ KCONFIG_INSERTS = [
      'drivers/cbus/Kconfig',
      'source "drivers/i2c/Kconfig"',
      'source "drivers/i2c/Kconfig"\n\nsource "drivers/cbus/Kconfig"'),
+
+    # The panel driver above needs a config symbol to be selected by.
+    ('drivers/video/omap/Kconfig',
+     'FB_OMAP_LCD_MIPID',
+     'config FB_OMAP_LCDC_EXTERNAL',
+     'config FB_OMAP_LCD_MIPID\n'
+     '\tbool "MIPI DBI-C/DCS compatible LCD support"\n'
+     '\tdepends on FB_OMAP\n'
+     '\tselect SPI\n'
+     '\thelp\n'
+     '\t  The Nokia N810 uses an ls041y3 panel behind this interface.\n'
+     '\n'
+     'config FB_OMAP_LCDC_EXTERNAL'),
 ]
 
 
@@ -56,7 +88,7 @@ def main():
         open(path, 'a').write(text)
         print('    %-32s += %s' % (path, marker))
 
-    for path, marker, anchor, replacement in KCONFIG_INSERTS:
+    for path, marker, anchor, replacement in KCONFIG_INSERTS + INSERTS:
         if not os.path.exists(path):
             print('    SKIP %s (absent)' % path)
             continue
