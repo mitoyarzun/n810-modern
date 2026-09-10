@@ -372,9 +372,35 @@ arch/arm/plat-omap/fb.c    79          344    342
 Check each reject against vanilla 2.6.28 **before** porting it. The usual
 right answer is to drop it.
 
-**It compiles, and it links.** With `omap_generic_2420_defconfig` the rebased
-tree builds a **760,952 byte zImage**. With `nokia_2420_defconfig` the final
-link still fails; that is the open item.
+**It builds.** `tools/mk-kernel-2628.sh` produces a working ARM zImage from
+Nokia's own board config:
+
+```
+Linux version 2.6.28 (gcc version 4.9.4)
+arch/arm/boot/zImage: Linux kernel ARM boot executable zImage (little-endian)
+
+Nokia N800
+Nokia RX-44        <- the N810
+Nokia RX-48        <- N810 WiMAX
+
+stock 2.6.21: 1,536,640 bytes
+ours  2.6.28: 1,563,044 bytes
+```
+
+Within 2% of Nokia's own kernel, with the Blizzard framebuffer, the cbus retu
+and tahvo drivers, menelaus, tsc2301 and the TUSB6010 all compiled in.
+
+**Not yet booted.** Building is not running; that is the next test.
+
+Left out of this first kernel, and each one is a deliberate choice rather than
+an oversight:
+
+| | Why |
+| --- | --- |
+| `CONFIG_OMAP_DSP` | reaches into the 2.6.21 PRCM layout that 2.6.28 replaced. `WITH_DSP=1` keeps it in for whoever ports it |
+| `CONFIG_MACH_OMAP2420_DVFS` | needs `scale_freq.c`, which is not in Nokia's published delta |
+| USB sleep gating | `omap2_block_sleep()` was Nokia's, in the `pm.c` this rebase replaces. **Stubbed** -- the SoC may sleep during USB transfers |
+| Menelaus late-init | 2.6.28 passes platform data through the i2c client; this board code predates `I2C_BOARD_INFO`. **Stubbed** |
 
 Getting there needed a period compiler. GCC 13 cannot build a 2008 kernel: it
 dies on GNU89 inline semantics, then a cast-as-lvalue that GCC 4.0 removed,
@@ -402,6 +428,34 @@ implicit rules; `kernel/timeconst.pl` uses `defined(@array)`, which Perl 5.22
 removed; and empty `built-in.o` files are empty `ar` archives, which binutils
 2.29 cannot derive a machine from -- it says `no machine record defined` and
 names no file.
+
+### The failure that repeats
+
+One shape accounted for most of the work, and it is worth stating on its own:
+
+> Nokia's **source files** all apply cleanly, because they are new files.
+> What rejects, every time, is the line that **wires** a file into the build --
+> an `obj-y` in a Makefile, a `source` in a Kconfig -- because 2.6.28 rewrote
+> those files around them.
+
+The result is a tree that looks complete and a kernel that is missing the
+driver, with no error until much later. The worst instance: all twelve board
+sources applied, but the `mach-omap2/Kconfig` and `Makefile` hunks rejected, so
+`CONFIG_MACH_NOKIA_*` named symbols no Kconfig declared. kconfig drops unknown
+options silently, nothing built the board files, and the kernel ended up with
+**no `MACHINE_START` at all**. The final link then said:
+
+```
+arm-linux-gnueabi-ld: no machine record defined
+```
+
+which is, read literally, exactly right -- and names nothing. It cost a config
+bisect over 911 options to find, and the answer was
+`# CONFIG_MACH_OMAP_GENERIC is not set`.
+
+A related one: ARM does not source `drivers/Kconfig`. `arch/arm/Kconfig`
+sources 48 driver Kconfigs itself. Adding `drivers/cbus` to `drivers/Kconfig`
+looks right, changes nothing, and surfaces as an undefined symbol.
 
 ### The rule that made it converge
 

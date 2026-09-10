@@ -14,6 +14,7 @@
 # a GCC from the 4.x era; GCC 13 will not build a 2.6.28 tree. See the end.
 set -euo pipefail
 
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK="${1:-$PWD/build/kernel}"
 JOBS="${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
 
@@ -157,6 +158,31 @@ n=$(grep -rl 'asm/arch/' --include='*.c' --include='*.h' --include='*.S' . 2>/de
 grep -rl 'asm/arch/' --include='*.c' --include='*.h' --include='*.S' . 2>/dev/null \
   | xargs -r sed -i 's|asm/arch/|mach/|g'
 echo "    rewrote $n files"
+
+# 2.6.28 also folded asm/hardware.h into mach/hardware.h for ARM.
+h=$(grep -rl 'asm/hardware\.h' --include='*.c' --include='*.h' --include='*.S' . 2>/dev/null | wc -l | tr -d ' ')
+grep -rl 'asm/hardware\.h' --include='*.c' --include='*.h' --include='*.S' . 2>/dev/null \
+  | xargs -r sed -i 's|asm/hardware\.h|mach/hardware.h|g'
+echo "    rewrote $h files using asm/hardware.h"
+
+# 2.6.28 also dropped the IRQT_* names in favour of IRQ_TYPE_*.
+i=$(grep -rl 'IRQT_' --include='*.c' --include='*.h' . 2>/dev/null | wc -l | tr -d ' ')
+grep -rl 'IRQT_' --include='*.c' --include='*.h' . 2>/dev/null | xargs -r sed -i \
+  -e 's/\bIRQT_FALLING\b/IRQ_TYPE_EDGE_FALLING/g' \
+  -e 's/\bIRQT_RISING\b/IRQ_TYPE_EDGE_RISING/g' \
+  -e 's/\bIRQT_BOTHEDGE\b/IRQ_TYPE_EDGE_BOTH/g' \
+  -e 's/\bIRQT_HIGH\b/IRQ_TYPE_LEVEL_HIGH/g' \
+  -e 's/\bIRQT_LOW\b/IRQ_TYPE_LEVEL_LOW/g' \
+  -e 's/\bIRQT_NOEDGE\b/IRQ_TYPE_NONE/g'
+echo "    rewrote $i files using IRQT_*"
+
+# 2.6.21's linux/input.h had LONG(x) and BIT(x) for bitmap indexing. 2.6.28
+# renamed them BIT_WORD(x) and BIT_MASK(x). Scoped to drivers/cbus, which is
+# the only Nokia code here that uses them.
+l=$(grep -rlE '\bLONG\(' drivers/cbus 2>/dev/null | wc -l | tr -d ' ')
+grep -rlE '\bLONG\(' drivers/cbus 2>/dev/null \
+  | xargs -r sed -i -E 's/\bLONG\(/BIT_WORD(/g'
+echo "    rewrote $l files in drivers/cbus using LONG()"
 
 # Whole subsystems where the size comparison above already showed that
 # upstream took Nokia's work. jffs2 is the clear case: readinode.c is 1435
@@ -342,6 +368,164 @@ edit('sound/arm/Kconfig',
      'SND_AIC33: select -> depends (I2C cycle)')
 PY
 
+# THE LAST BLOCKER, and the most consequential silent failure of the lot.
+#
+# All twelve N800/N810 board sources apply cleanly -- board-n800.c,
+# board-n810.c and friends, each with its MACHINE_START. But Nokia's hunks
+# adding the machines to mach-omap2/Kconfig and Makefile REJECT, because
+# 2.6.28 rewrote both files (it added Beagle, LDP and Overo).
+#
+# The consequence is invisible. nokia_2420_defconfig sets CONFIG_MACH_NOKIA_*,
+# kconfig silently drops options that no Kconfig declares, nothing builds the
+# board files, and the kernel ends up with NO MACHINE_START at all. The
+# .arch.info section is empty and the final link fails with
+#
+#   arm-linux-gnueabi-ld: no machine record defined
+#
+# which is, read literally, exactly right -- and names nothing.
+#
+# RX-44 is the N810; RX-48 is the N810 WiMAX; N800 is the N800.
+echo "==> Restoring the Nokia machine entries that rejected"
+python3 - <<'PYY'
+kc = 'arch/arm/mach-omap2/Kconfig'
+s = open(kc).read()
+block = """config MACH_NOKIA_N800
+	bool "Nokia N800"
+	depends on ARCH_OMAP24XX
+
+config MACH_NOKIA_RX44
+	bool "Nokia RX44 (N810)"
+	depends on ARCH_OMAP24XX && MACH_NOKIA_N800
+	select MACH_OMAP2_TUSB6010
+
+config MACH_NOKIA_RX48
+	bool "Nokia RX48 (N810 WiMAX)"
+	depends on ARCH_OMAP24XX && MACH_NOKIA_N800
+	select MACH_OMAP2_TUSB6010
+
+config MACH_OMAP2_TUSB6010
+	bool
+
+"""
+if 'MACH_NOKIA_N800' in s:
+    print('    SKIP Kconfig (already has the machines)')
+else:
+    anchor = 'config MACH_OMAP_GENERIC'
+    s = s.replace(anchor, block + anchor, 1)
+    open(kc, 'w').write(s)
+    print('    Kconfig:  added MACH_NOKIA_N800 / RX44 / RX48')
+
+mk = 'arch/arm/mach-omap2/Makefile'
+s = open(mk).read()
+lines = """
+obj-$(CONFIG_MACH_NOKIA_N800)		+= board-n800.o board-n800-flash.o \\
+					   board-n800-mmc.o board-n800-bt.o \\
+					   board-n800-audio.o board-n800-usb.o \\
+					   board-n800-pm.o board-n800-camera.o
+obj-$(CONFIG_MACH_NOKIA_RX44)		+= board-n810.o board-n810-keyboard.o
+obj-$(CONFIG_MACH_NOKIA_N800)		+= board-n800-dsp.o
+"""
+if 'board-n800.o' in s:
+    print('    SKIP Makefile (already builds the board files)')
+else:
+    open(mk, 'a').write(lines)
+    print('    Makefile: added the board object lines')
+PYY
+
+# board-n800-mmc.c is the only board file with real API drift, and it is small:
+# 2.6.28's menelaus dropped the low-power argument, removed MMC_POWER_STANDBY,
+# and renamed ban_openended_read to ban_openended.
+#
+# NOTE: dropping the argument also drops Nokia's low-power MMC mode. 2.6.28's
+# menelaus simply does not expose it. Nothing else in this tree used it.
+echo "==> Adapting board-n800-mmc.c to the 2.6.28 MMC API"
+python3 - <<'PYY'
+p = 'arch/arm/mach-omap2/board-n800-mmc.c'
+try:
+    s = open(p).read()
+except IOError:
+    print('    SKIP (file absent)'); raise SystemExit
+orig = s
+s = s.replace('menelaus_set_vmmc(0, 0)', 'menelaus_set_vmmc(0)')
+s = s.replace('menelaus_set_vmmc(mV, low_power)', 'menelaus_set_vmmc(mV)')
+s = s.replace('menelaus_set_vdcdc(3, 0, 0)', 'menelaus_set_vdcdc(3, 0)')
+s = s.replace('menelaus_set_vdcdc(3, mV, low_power)', 'menelaus_set_vdcdc(3, mV)')
+s = s.replace('low_power = (power_mode == MMC_POWER_STANDBY);',
+              'low_power = 0;	/* 2.6.28 has no MMC_POWER_STANDBY */')
+s = s.replace('ban_openended_read', 'ban_openended')
+if s != orig:
+    open(p, 'w').write(s)
+    print('    menelaus arity, MMC_POWER_STANDBY, ban_openended')
+else:
+    print('    SKIP (already adapted)')
+PYY
+
+# Two more wirings that rejected, both invisible until much later.
+#
+# 1. prcm-regs.h (carried forward above) uses two macros 2.6.21 had and 2.6.28
+#    renamed: OMAP24XX_PRCM_BASE is now OMAP2_PRCM_BASE, and __REG32 is gone.
+#    board-n800-audio.c needs this header for struct dsp_kfunc_device, so this
+#    blocks audio even with the DSP switched off.
+#
+# 2. drivers/cbus holds the retu and tahvo drivers -- the power button, RTC,
+#    watchdog and the N810 keyboard's backlight. Nokia's Kconfig and Makefile
+#    for it apply fine, but the lines wiring it into drivers/Kconfig and
+#    drivers/Makefile reject, so nothing builds it and the config options
+#    vanish silently. Same failure shape as the machine entries above.
+echo "==> Wiring up prcm-regs.h and drivers/cbus"
+python3 - <<'PYY'
+p = 'arch/arm/mach-omap2/prcm-regs.h'
+s = open(p).read()
+shim = """/* Rebased onto 2.6.28: these two names changed. */
+#include <mach/io.h>
+#include <mach/omap24xx.h>
+#ifndef OMAP24XX_PRCM_BASE
+#define OMAP24XX_PRCM_BASE	OMAP2_PRCM_BASE
+#endif
+#ifndef __REG32
+#define __REG32(paddr)		(*(volatile u32 *)__OMAP2_IO_ADDRESS(paddr))
+#endif
+
+"""
+if '__OMAP2_IO_ADDRESS' in s:
+    print('    SKIP prcm-regs.h (already shimmed)')
+else:
+    open(p, 'w').write(shim + s)
+    print('    prcm-regs.h: OMAP24XX_PRCM_BASE and __REG32 shimmed')
+
+p = 'drivers/Kconfig'; s = open(p).read()
+if 'drivers/cbus/Kconfig' in s:
+    print('    SKIP drivers/Kconfig')
+else:
+    s = s.replace('source "drivers/staging/Kconfig"',
+                  'source "drivers/cbus/Kconfig"\n\nsource "drivers/staging/Kconfig"', 1)
+    open(p, 'w').write(s)
+    print('    drivers/Kconfig:  sourced drivers/cbus')
+
+p = 'drivers/Makefile'; s = open(p).read()
+if 'cbus/' in s:
+    print('    SKIP drivers/Makefile')
+else:
+    open(p, 'a').write('obj-$(CONFIG_CBUS)\t\t+= cbus/\n')
+    print('    drivers/Makefile: added cbus/')
+PYY
+
+# board-n800-usb.c, the last file with API drift:
+#   - 2.6.28 moved `multipoint` out of musb_hdrc_platform_data into a separate
+#     musb_hdrc_config that the platform data points at.
+#   - omap2_block_sleep()/omap2_allow_sleep() were Nokia's, defined in their
+#     arch/arm/mach-omap2/pm.c, which this rebase replaces with 2.6.28's.
+#
+# CAUTION: the sleep gating is STUBBED, not ported. Nokia used it to keep the
+# OMAP awake while the TUSB6010 was active. Without it the SoC may sleep during
+# USB transfers. Acceptable for a first boot; not acceptable for shipping.
+echo "==> Adapting board-n800-usb.c to the 2.6.28 musb API"
+python3 "$HERE/fix-n800-usb.py"
+python3 "$HERE/fix-n800-pm.py"
+python3 "$HERE/fix-build-wiring.py"
+python3 "$HERE/fix-retu-rtc.py"
+python3 "$HERE/fix-retu-headset.py"
+
 echo "==> Generating Nokia's board config on the 2.6.28 tree"
 make ARCH=arm nokia_2420_defconfig > ../defconfig.log 2>&1 || {
   echo "    FAILED -- see $WORK/defconfig.log"; tail -12 ../defconfig.log; exit 1; }
@@ -357,6 +541,7 @@ if [ "${WITH_DSP:-0}" != "1" ]; then
   echo "==> Disabling CONFIG_OMAP_DSP for the first build (WITH_DSP=1 to keep it)"
   sed -i 's/^CONFIG_OMAP_DSP=y/# CONFIG_OMAP_DSP is not set/' .config
   sed -i '/^CONFIG_OMAP_DSP_/d' .config
+  sed -i 's/^CONFIG_MACH_OMAP2420_DVFS=y/# CONFIG_MACH_OMAP2420_DVFS is not set/' .config
   yes "" | make ARCH=arm oldconfig > ../oldconfig.log 2>&1 || true
 fi
 
