@@ -96,11 +96,16 @@ everything above it is healthy. `tools/fb-autoupdate.c` sets
 Writing to `/dev/fb0` to test this proves nothing: on a manual-update panel a
 plain write never reaches the screen either way.
 
-**The applications menu never opens, and the theme is why.** Clicking the
-applications button in the task navigator does nothing. The button itself is
-live -- it takes the click and changes to its pressed state -- but no menu
-maps. Verified by injecting the click through the QEMU monitor and diffing
-screendumps: **0 pixels change** on the stock image.
+**No popup menu ever opens, and the theme is why.** Clicking the applications
+button in the task navigator does nothing. Neither does clicking an
+application's own title-bar menu. The buttons are live -- they take the click
+and change to their pressed state -- but no menu maps.
+
+Verified by injecting clicks through the QEMU monitor and diffing
+screendumps, three times: the applications button on the stock image
+(**0 pixels change**), the applications button on a modified image, and a
+GTK application's title-bar menu. Only the parts of the screen that were
+animating anyway ever differ.
 
 Both boot logs carry the cause, or at least its best candidate:
 
@@ -113,10 +118,14 @@ Hildon's theme gtkrc fails to parse at line 3, so theme resources never fully
 resolve, and a popup whose style comes from that theme has nothing to draw
 with. Not yet proven, and not yet fixed.
 
-The consequence for anyone adding an application to this image: a correct
-entry in `/etc/xdg/menus/applications.menu` is **unreachable here** and will
-look like your own bug. It is not -- the entry is fine and works on real
-hardware. Launch the program from an init script instead:
+Two consequences for anyone building on this image. A correct entry in
+`/etc/xdg/menus/applications.menu` is **unreachable here** and will look like
+your own bug -- it is not; the entry is fine and works on real hardware. And
+any feature your application puts behind its own menu cannot be reached
+either, so give it a second route: a command-line flag, a config file, or a
+hardware key.
+
+Launch the program from an init script rather than the menu:
 
 ```sh
 su - user -c "DISPLAY=:0.0 /path/to/your-app" &
