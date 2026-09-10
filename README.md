@@ -16,6 +16,34 @@ This does not make the modern web work — nothing here renders a 2026 site. It
 buys package repositories, `git`, mail, IRC, RSS, and anything networked you
 write yourself.
 
+## Install it on the device
+
+You do not need to build any of this. Grab the packages and install them with
+the device's own `dpkg`:
+
+```sh
+dpkg -i n810-modern-tls_1.0_armel.deb     # OpenSSL 3.5, curl, stunnel, CA store
+dpkg -i n810-modern-ssh_1.0_armel.deb     # OpenSSH 10.5
+export LD_LIBRARY_PATH=/opt/handshake/lib
+/opt/handshake/bin/curl https://example.org/
+```
+
+Everything lands in `/opt/handshake`, alongside the stock libraries rather than
+over them. Nothing already on the device changes, and `dpkg -r` removes it
+cleanly.
+
+| Package | Size | Contents |
+| --- | --- | --- |
+| `n810-modern-tls` | 3.2 MB | OpenSSL 3.5.8, zlib 1.3.2, curl 8.22.0, stunnel 5.80, current CA store |
+| `n810-modern-ssh` | 3.2 MB | OpenSSH 10.5p1 (`Depends:` the above) |
+| `n810-modern-tls-dev` | 3.8 MB | headers and link libraries, only needed to compile against them |
+| `n810-modern-kernel` | 1.5 MB | 2.6.21 with backported syscalls. **Installing does not flash**; run `n810-modern-flash-kernel` deliberately |
+
+Verified by installing them on the real Diablo userland under emulation, with
+the device's own dpkg 1.14.7maemo5 (`tools/deb-smoke.sh`).
+
+## Building it yourself
+
 ## Quickstart
 
 **Docker is required, not a convenience.** The build unpacks 2008 Debian
@@ -202,7 +230,11 @@ qemu-curl-test.sh       fetch a page; confirm a bad certificate is refused
 mk-diablo-emulator.sh   fetch and unpack the real firmware
 emulator-smoke.sh       run it on the real 2.6.21 kernel
 probe-kernel.sh         ask that kernel what it supports (TUN, audio, iptables)
+mk-kernel-2621-backport.sh  Nokia's own kernel, plus the syscalls it lacks
+backport-syscalls.py    the futex/epoll_create1/pipe2/accept4 patches
 mk-kernel-2628.sh       rebase Nokia's Diablo patches onto vanilla 2.6.28
+mk-debs.sh              package the build as installable .deb files
+deb-smoke.sh            install those packages on the device's own dpkg
 emulator-gui-build.sh   build an image that reaches the desktop
 emulator-gui.sh         boot that, over VNC
 fb-autoupdate.c         forces the panel to refresh; built for the guest

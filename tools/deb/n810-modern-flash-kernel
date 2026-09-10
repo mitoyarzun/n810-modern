@@ -1,0 +1,59 @@
+#!/bin/sh
+# Flash the kernel shipped by n810-modern-kernel onto this device.
+#
+# This is deliberately a separate command rather than something the package
+# does on install. Installing a package should not rewrite the boot flash.
+#
+# It is reversible: the running kernel is backed up first, and the restore
+# command is printed. But it is still a flash, on a device whose battery is
+# probably older than the software.
+set -e
+
+NEW=/opt/n810-modern/boot/zImage
+BACKUP_DIR=/opt/n810-modern/backup
+
+die() { echo "$*" >&2; exit 1; }
+
+[ -f "$NEW" ] || die "no kernel at $NEW -- is n810-modern-kernel installed?"
+
+# Refuse anywhere that is not an N8x0. Flashing the wrong device is not a
+# recoverable mistake.
+if [ ! -f /proc/component_version ] && ! grep -qi "nokia" /proc/cpuinfo 2>/dev/null; then
+	die "this does not look like a Nokia tablet -- refusing to flash"
+fi
+
+command -v fiasco-flasher >/dev/null 2>&1 || \
+	die "fiasco-flasher not found. It lives in the initfs; on Diablo you may
+need to run this from a root shell with the initfs mounted."
+
+# Find the kernel partition rather than assuming a number.
+MTD=$(awk -F: '/"kernel"/ {print $1}' /proc/mtd 2>/dev/null | head -1)
+[ -n "$MTD" ] || die "could not find a \"kernel\" partition in /proc/mtd"
+SIZE=$(awk -F'[: ]+' '/"kernel"/ {print $2}' /proc/mtd | head -1)
+
+echo "About to flash:"
+echo "  new kernel   $NEW ($(wc -c < "$NEW") bytes)"
+echo "  destination  /dev/$MTD  (partition size 0x$SIZE)"
+echo "  backup       $BACKUP_DIR/zImage.backup"
+echo
+echo "The device will reboot into the new kernel. If it does not boot, you can"
+echo "restore over USB from a host with the Nokia flasher and the original"
+echo "firmware image -- keep that image before you continue."
+echo
+printf "Type YES to flash: "
+read answer
+[ "$answer" = "YES" ] || die "aborted"
+
+mkdir -p "$BACKUP_DIR"
+echo "==> Backing up the running kernel"
+dd if="/dev/$MTD" of="$BACKUP_DIR/zImage.backup" bs=4096 2>/dev/null
+echo "    saved $(wc -c < "$BACKUP_DIR/zImage.backup") bytes"
+
+echo "==> Flashing"
+fiasco-flasher -f -k "$NEW"
+
+echo
+echo "Done. Reboot to run it."
+echo
+echo "To go back:"
+echo "  fiasco-flasher -f -k $BACKUP_DIR/zImage.backup"
