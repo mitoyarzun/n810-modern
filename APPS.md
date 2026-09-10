@@ -261,6 +261,53 @@ CPU gate completely.
 That is a limit of the emulator, not of the device. Audio work waits for
 hardware.
 
+## The kernel: backport, don't upgrade
+
+Two routes were built and measured. **The backport wins**, and the 2.6.28 work
+is kept for what it taught rather than what it produced.
+
+`tools/mk-kernel-2621-backport.sh` takes Nokia's own Diablo kernel and adds the
+syscalls modern userspace needs. Measured on the real kernel under emulation,
+before and after:
+
+| | stock 2.6.21 | backported |
+| --- | --- | --- |
+| `futex WAIT_PRIVATE` | ENOSYS | **present** |
+| `epoll_create1` | ENOSYS | **present** |
+| `pipe2` | ENOSYS | **present** |
+| `accept4` | ENOSYS | **present** |
+| `eventfd2` | ENOSYS | still absent — needs `anon_inodes` |
+| `getrandom` | ENOSYS | absent (3.17; callers use `/dev/urandom`) |
+
+And it keeps everything, which is the point:
+
+```
+omap_dsp_init() done
+dsp dsp: OMAP DSP driver initialization
+Menelaus rev 2.2
+Tahvo/Betty driver initialising
+Retu/Vilma driver initialising
+omapfb: Framebuffer initialized
+```
+
+It boots to the Hildon desktop with `CONFIG_OMAP_DSP`, `CONFIG_MMC_OMAP`,
+`CONFIG_MACH_OMAP2420_DVFS` and `CONFIG_CBUS` all enabled — the four things the
+2.6.28 route had to give up.
+
+**Why the backport is small.** Private futexes are an optimisation, not a
+semantic: 2.6.22's whole mechanism is skipping `mmap_sem` for a
+process-local futex. 2.6.21 always takes it, which is correct for both cases,
+so masking the flag off and running the existing path works. The mask belongs
+in `sys_futex()`, which compares the raw op in three places, not in
+`do_futex()`. The other four syscalls are the flag-taking forms of calls that
+already exist. See `tools/backport-syscalls.py`, including the caveat that the
+wrappers reintroduce the `O_CLOEXEC` race those syscalls were invented to
+close.
+
+**What it still does not buy.** Go's floor is 2.6.32, and 3.2 from Go 1.24.
+These syscalls are necessary, not proven sufficient — whether Go actually runs
+is the next experiment, and `eventfd` is the likely next blocker.
+
 ## Upgrading the kernel
 
 Every "no" above traces back to Linux 2.6.21. That gate is the only one you
