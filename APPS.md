@@ -390,7 +390,52 @@ ours  2.6.28: 1,563,044 bytes
 Within 2% of Nokia's own kernel, with the Blizzard framebuffer, the cbus retu
 and tahvo drivers, menelaus, tsc2301 and the TUSB6010 all compiled in.
 
-**Not yet booted.** Building is not running; that is the next test.
+**It boots, and it reaches the desktop.** The rebased kernel runs the real
+Diablo userspace under QEMU -- Matchbox, Hildon Desktop, the lot -- on the
+N810 machine:
+
+```
+Linux version 2.6.28 (gcc version 4.9.4)
+Machine: Nokia RX-44
+omapfb: ls041y3 rev 8f LCD detected
+omapfb: s1d13745 LCD controller rev 1 initialized (CNF pins 3)
+VFS: Mounted root (jffs2 filesystem).
+Starting Matchbox window manager
+Starting Hildon Desktop
+```
+
+### The bug that kept the screen black
+
+Worth writing down, because the window it depends on is invisible on real
+hardware. `rfbi_transfer_area()` stored its completion callback *after*
+enabling the clocks and programming DISPC:
+
+```c
+BUG_ON(callback == NULL);
+rfbi_enable_clocks(1);                  /* can deliver a pending FRAMEDONE */
+omap_dispc_set_lcd_size(width, height); /* so can this */
+rfbi.lcdc_callback = callback;          /* only stored HERE */
+```
+
+On hardware a 384000-pixel transfer takes milliseconds, so the interrupt
+cannot beat the assignment. QEMU copies the whole frame and raises FRAMEDONE
+**synchronously, inside the MMIO write**. The completion arrived first,
+`rfbi_dma_callback()` found NULL, dropped it, and the blizzard request queue
+stalled permanently. Exactly one transfer ever ran, pushing the framebuffer as
+it looked at boot: black. Userspace was fine the whole time and never knew.
+
+Storing the callback before any register access fixes it. Measured over one
+boot:
+
+```
+                    transfers   completions        blizzard_sync
+before                      1   1 with NULL cb     2 ok, 9 timed out
+after                    1934   1934 delivered    11 ok, 0 timed out
+```
+
+Found by instrumenting QEMU's `omap_rfbi_transfer_start()` rather than the
+kernel -- the emulator was the cheaper place to ask, and it named the
+condition directly.
 
 Left out of this first kernel, and each one is a deliberate choice rather than
 an oversight:
