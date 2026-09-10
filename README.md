@@ -18,17 +18,24 @@ write yourself.
 
 ## Install it on the device
 
-You do not need to build any of this. Grab the packages and install them with
-the device's own `dpkg`:
+You do not need to build any of this, and you only install **one** package by
+hand. Download it on a PC, copy it across by SD card or USB mass storage --
+neither needs anything on the tablet -- then as root:
 
 ```sh
-dpkg -i n810-modern-tls_1.0_armel.deb     # OpenSSL 3.5, curl, stunnel, CA store
-dpkg -i n810-modern-ssh_1.0_armel.deb     # OpenSSH 10.5
-export LD_LIBRARY_PATH=/opt/handshake/lib
-/opt/handshake/bin/curl https://example.org/
+dpkg -i n810-modern-tls_1.0_armel.deb
 ```
 
-Everything lands in `/opt/handshake`, alongside the stock libraries rather than
+That is the whole manual step. It has to be manual because a stock device
+cannot complete a modern TLS handshake, so it cannot download anything. The
+package brings OpenSSL 3.5, zlib, curl, stunnel and a current CA store:
+
+```sh
+export LD_LIBRARY_PATH=/opt/n810-modern/lib
+/opt/n810-modern/bin/curl https://example.org/
+```
+
+Everything lands in `/opt/n810-modern`, alongside the stock libraries rather than
 over them. Nothing already on the device changes, and `dpkg -r` removes it
 cleanly.
 
@@ -41,6 +48,32 @@ cleanly.
 
 Verified by installing them on the real Diablo userland under emulation, with
 the device's own dpkg 1.14.7maemo5 (`tools/deb-smoke.sh`).
+
+### After the first one, it updates itself
+
+`n810-modern-tls` also installs `n810-modern-update`, which fetches everything
+else over TLS 1.3:
+
+```sh
+n810-modern-update                          # what is available
+n810-modern-update install n810-modern-ssh
+n810-modern-update upgrade
+```
+
+Only the first package has to arrive by hand, because a stock device cannot
+complete a modern handshake to download anything. Once it is installed the
+device has curl with a current CA store, and the rest is one command.
+
+**`apt` cannot do this**, which is worth knowing before you try: apt's
+transport methods link against the system OpenSSL 0.9.8, not the copy under
+`/opt/n810-modern`, so apt still cannot reach an HTTPS host after installing
+this. Pointing apt at the repository would need an `/etc/hosts` hijack and a
+hardcoded GitHub IP fronted by stunnel. The updater avoids all of that.
+
+Authenticity comes from the TLS connection: certificates are verified against
+the shipped CA store, so there is no GPG keyring to manage and no 2008-era
+`gpgv` compatibility to worry about. The SHA-256 in the index catches
+truncation and corruption, not a hostile server.
 
 ## Building it yourself
 
@@ -69,8 +102,8 @@ tools/build-in-docker.sh
 Fetches a Diablo sysroot from the community mirrors, cross-compiles OpenSSL
 3.5.8 and stunnel 5.80, installs a current CA store, and runs both test suites
 against the device's own glibc 2.5 under QEMU — including a real TLS 1.3
-handshake. Result: `dist/handshake-diablo-armel.tar.gz`, 5.3 MB, unpacks to
-`/opt/handshake` on the device.
+handshake. Result: `dist/n810-modern-diablo-armel.tar.gz`, 5.3 MB, unpacks to
+`/opt/n810-modern` on the device.
 
 | Host | Clean build |
 | --- | --- |
@@ -167,9 +200,9 @@ whether the real kernel serves every syscall the binaries make. It does.
 ### On the device
 
 ```sh
-tar xzf handshake-diablo-armel.tar.gz -C /opt
-export LD_LIBRARY_PATH=/opt/handshake/lib
-/opt/handshake/bin/openssl version -a
+tar xzf n810-modern-diablo-armel.tar.gz -C /opt
+export LD_LIBRARY_PATH=/opt/n810-modern/lib
+/opt/n810-modern/bin/openssl version -a
 ```
 
 A stock device has no `openssl` CLI, no `wget`, no `curl` and no Python — only
@@ -178,7 +211,7 @@ storage needs nothing installed.
 
 ## Status
 
-Four packages in `/opt/handshake`, all alongside the stock libraries rather
+Four packages in `/opt/n810-modern`, all alongside the stock libraries rather
 than over them:
 
 | | |
@@ -235,6 +268,8 @@ backport-syscalls.py    the futex/epoll_create1/pipe2/accept4 patches
 mk-kernel-2628.sh       rebase Nokia's Diablo patches onto vanilla 2.6.28
 mk-debs.sh              package the build as installable .deb files
 deb-smoke.sh            install those packages on the device's own dpkg
+mk-pages-repo.sh        build the static tree GitHub Pages serves
+update-smoke.sh         fetch and verify a package with the device's own curl
 emulator-gui-build.sh   build an image that reaches the desktop
 emulator-gui.sh         boot that, over VNC
 fb-autoupdate.c         forces the panel to refresh; built for the guest

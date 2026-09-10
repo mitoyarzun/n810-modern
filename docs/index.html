@@ -1,0 +1,42 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>n810-modern packages</title>
+<style>
+ body{font:16px/1.6 system-ui,sans-serif;max-width:42rem;margin:3rem auto;padding:0 1rem}
+ code,pre{font-family:ui-monospace,Menlo,monospace;font-size:.9em}
+ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}
+ table{border-collapse:collapse;width:100%}
+ td,th{text-align:left;padding:.3rem .6rem .3rem 0;border-bottom:1px solid #eee}
+ .note{color:#555;font-size:.95em}
+</style>
+<h1>n810-modern packages</h1>
+<p>Modern software for the Nokia N800 and N810 running Maemo 4.1.2 (Diablo).
+   Source and issues:
+   <a href="https://github.com/mitoyarzun/n810-modern">github.com/mitoyarzun/n810-modern</a></p>
+
+<h2>One package, by hand</h2>
+<p>A stock device cannot complete a modern TLS handshake, so it cannot download
+   anything. Get this one on a PC and copy it across by SD card or USB mass
+   storage, then as root on the tablet:</p>
+<pre>dpkg -i n810-modern-tls_1.0_armel.deb</pre>
+<p class="note">It installs OpenSSL 3.5, zlib, curl and stunnel under
+   <code>/opt/n810-modern</code>, alongside the stock libraries rather than over
+   them. Nothing already on the device changes.</p>
+
+<h2>Everything else, over the network</h2>
+<p>That package ships <code>n810-modern-update</code>, which uses the curl it
+   just installed:</p>
+<pre>n810-modern-update
+n810-modern-update install n810-modern-ssh
+n810-modern-update upgrade</pre>
+
+<h2>Packages</h2>
+<table><tr><th>Package<th>Version<th>Download</tr>
+<tr><td>n810-modern-kernel<td>1.0<td><a href="https://github.com/mitoyarzun/n810-modern/releases/download/v1.0/n810-modern-kernel_1.0_armel.deb">n810-modern-kernel_1.0_armel.deb</a></tr>
+<tr><td>n810-modern-ssh<td>1.0<td><a href="https://github.com/mitoyarzun/n810-modern/releases/download/v1.0/n810-modern-ssh_1.0_armel.deb">n810-modern-ssh_1.0_armel.deb</a></tr>
+<tr><td>n810-modern-tls-dev<td>1.0<td><a href="https://github.com/mitoyarzun/n810-modern/releases/download/v1.0/n810-modern-tls-dev_1.0_armel.deb">n810-modern-tls-dev_1.0_armel.deb</a></tr>
+<tr><td>n810-modern-tls<td>1.0<td><a href="https://github.com/mitoyarzun/n810-modern/releases/download/v1.0/n810-modern-tls_1.0_armel.deb">n810-modern-tls_1.0_armel.deb</a></tr>
+</table>
+<p class="note"><a href="index.txt">index.txt</a> is the machine-readable form.
+   None of this has been tested on physical hardware yet -- it is verified
+   under emulation.</p>

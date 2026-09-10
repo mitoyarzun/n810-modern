@@ -1,0 +1,6 @@
+# n810-modern package index
+# name version size sha256 url
+n810-modern-kernel 1.0 1492158 76ffb49f936cf346f8979693814ec4ccc7f52fbcbee2ea22706c420213caa222 https://github.com/mitoyarzun/n810-modern/releases/download/v1.0/n810-modern-kernel_1.0_armel.deb
+n810-modern-ssh 1.0 3248886 9b9f0fa758bbe66773182abf432e823a31259d1cb90297b40437b713bb73ac83 https://github.com/mitoyarzun/n810-modern/releases/download/v1.0/n810-modern-ssh_1.0_armel.deb
+n810-modern-tls-dev 1.0 3944290 a7f4b2b835c307da36e56b853ac255c42d44fc235b1b6ad8d62701d20b0c93ae https://github.com/mitoyarzun/n810-modern/releases/download/v1.0/n810-modern-tls-dev_1.0_armel.deb
+n810-modern-tls 1.0 3279178 696fd795c101590bd9256f45bfe37bebf41b541e25ca5f7902af1528ca8459d6 https://github.com/mitoyarzun/n810-modern/releases/download/v1.0/n810-modern-tls_1.0_armel.deb
