@@ -9,7 +9,7 @@
 #   sed -i '/location\.desktop/d' etc/hildon-desktop/statusbar.conf
 #
 #   # Start something at boot:
-#   printf '#!/bin/sh\n/opt/handshake/bin/my-daemon &\n' > etc/rc2.d/S97mine
+#   printf '#!/bin/sh\n/opt/n810-modern/bin/my-daemon &\n' > etc/rc2.d/S97mine
 #   chmod 0755 etc/rc2.d/S97mine
 #
 #   # Give the desktop a different wallpaper:
