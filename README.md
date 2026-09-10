@@ -16,6 +16,15 @@ This does not make the modern web work — nothing here renders a 2026 site. It
 buys package repositories, `git`, mail, IRC, RSS, and anything networked you
 write yourself.
 
+> **None of this has run on physical hardware.** Everything is verified under
+> emulation: the packages install with the device's own dpkg, the TLS stack
+> completes real TLS 1.3 handshakes and rejects bad certificates, and the
+> kernel boots Maemo to the Hildon desktop. But QEMU's `n810` machine models
+> no WiFi, no battery and no real timings, so WiFi, charging, power management
+> and performance are all untested. Treat the kernel package in particular as
+> a proof of concept: flashing is reversible and the helper backs up your
+> running kernel first, but it is still a flash.
+
 ## Install it on the device
 
 You do not need to build any of this, and you only install **one** package by
