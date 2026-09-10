@@ -206,34 +206,6 @@ tools/emulator-gui.sh           # over VNC, loopback, password printed at start
 `emulator-smoke.sh` answers what static checks and user-mode QEMU cannot:
 whether the real kernel serves every syscall the binaries make. It does.
 
-### Customising the desktop
-
-The image above is Nokia's, with the patches the emulator needs and nothing
-else. To change what the desktop shows, put your own files in an overlay:
-
-```sh
-cp -a gui-overlay.example gui-overlay
-$EDITOR gui-overlay/etc/hildon-desktop/tasknavigator.conf
-tools/emulator-gui-build.sh
-```
-
-The tree under `gui-overlay/` is the tree of the device, and the build copies
-it over the rootfs after every built-in patch. `gui-overlay/overlay.sh`, if
-you write one, runs after the copy with the rootfs as its working directory,
-for the edits a whole file cannot express.
-
-| | |
-| --- | --- |
-| `GUI_OVERLAY` | Where the overlay is. Default `gui-overlay`; skipped when absent |
-| `KEEP_ROOTFS=1` | Do not refresh the rootfs from `rootfs.stock` first |
-| `KEEP_CONTACTS=1` | Keep the contacts button, which the build drops |
-| `DEBUG_SHELL=1` | Add a framebuffer diagnostic dump to the boot |
-
-Each build starts from `rootfs.stock`, the untouched extraction, so the image
-is the firmware plus your overlay — not the firmware plus every earlier run.
-[gui-overlay.example/README.md](gui-overlay.example/README.md) lists the files
-that control the menus, the panels and the status bar.
-
 ### On the device
 
 ```sh
