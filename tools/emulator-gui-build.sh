@@ -17,11 +17,40 @@ WORK="${1:-$PWD/emulator}"
 OUT="${2:-$PWD/out}"
 PREFIX="$OUT/opt/handshake"
 
-[ -d "$WORK/rootfs" ] || { echo "no rootfs -- run tools/mk-diablo-emulator.sh"; exit 1; }
+# Your own files, copied over the rootfs at the end of the build. See
+# gui-overlay.example/README.md. The step is skipped when the directory does
+# not exist, which is the default.
+OVERLAY="${GUI_OVERLAY:-$HERE/../gui-overlay}"
+[ -d "$OVERLAY" ] && OVERLAY="$(cd "$OVERLAY" && pwd)"
+
+[ -d "$WORK/rootfs" ] || [ -d "$WORK/rootfs.stock" ] ||
+  { echo "no rootfs -- run tools/mk-diablo-emulator.sh"; exit 1; }
 command -v mkfs.jffs2 >/dev/null || { echo "mkfs.jffs2 not found -- apt install mtd-utils"; exit 1; }
 
 cd "$WORK"
 KERNEL=$(ls unpacked/kernel_* | head -1)
+
+echo "==> 0. Refreshing the working rootfs from rootfs.stock"
+# Every step below patches the extracted rootfs in place, so a second run
+# builds on the first. That is fine for the fixed patches, and wrong for a
+# customised image: a file you delete from your overlay would stay in the
+# tree. Start each build from the untouched extraction instead.
+#
+# KEEP_ROOTFS=1 skips this, for a rootfs you patched by hand.
+if [ "${KEEP_ROOTFS:-0}" = "1" ]; then
+  echo "    kept (KEEP_ROOTFS=1)"
+elif [ -d rootfs.stock ]; then
+  if command -v rsync >/dev/null; then
+    rsync -a --delete rootfs.stock/ rootfs/
+  else
+    rm -rf rootfs && cp -a rootfs.stock rootfs
+  fi
+  echo "    rootfs is stock again"
+else
+  echo "    WARNING: no rootfs.stock -- this build starts from the current"
+  echo "    rootfs, which earlier runs have already patched. Run"
+  echo "    tools/mk-diablo-emulator.sh to extract a stock tree."
+fi
 
 # jefferson does not extract the initfs for us; do it here if needed.
 if [ ! -d initfs-x ]; then
@@ -146,26 +175,31 @@ echo "==> 7. Creating the gconf directory ke-recv expects"
 #     ln -s /tmp/gconf-dir/system/osso/af /etc/osso-af-init/gconf-dir/system/osso/af
 # /var/lib/gconf exists but system/osso beneath it does not, so this fails:
 #     ln: /etc/osso-af-init/gconf-dir/system/osso/af: No such file or directory
-# hildon-desktop reads its plugin configuration from gconf, which fits a
-# desktop that paints its wallpaper and then waits on a spinner.
+# The desktop then paints its wallpaper and waits on a spinner. (The plugin
+# list is not in gconf: it comes from the .desktop files under X-Plugin-Dir.
+# See step 8.)
 mkdir -p rootfs/var/lib/gconf/system/osso
 chmod 0755 rootfs/var/lib/gconf/system rootfs/var/lib/gconf/system/osso
 
 echo "==> 8. The contacts button in the task navigator"
-# The left-hand task navigator loads its buttons from tasknavigator.conf. The
-# contacts plugin needs telephony and address-book backends the emulator does
-# not have, so the button does nothing but occupy the bar and load a library.
-# Drop it; the browser, applications menu and task switcher stay.
+# The contacts plugin needs telephony and address-book backends the emulator
+# does not have, so the button does nothing but occupy the bar and load a
+# library. Delete its descriptor; the browser, applications menu and task
+# switcher stay.
 #
-# KEEP_CONTACTS=1 keeps the button, for a screenshot of the stock bar or to
-# test the plugin itself. The default removes it. The edit is on the extracted
-# rootfs, so a previous run has already deleted the line: to get the button
-# back, extract the firmware again with tools/mk-diablo-emulator.sh.
-NAV=rootfs/etc/hildon-desktop/tasknavigator.conf
+# DELETE THE DESCRIPTOR, NOT THE LINE IN tasknavigator.conf. That config lists
+# the plugins, and editing it changes nothing on screen: hildon-desktop also
+# loads every .desktop file it finds in X-Plugin-Dir. Two boots proved it --
+# a bar with the line removed is pixel-identical to the stock bar, and the
+# button disappears only when the descriptor goes. See CAVEATS.md.
+#
+# KEEP_CONTACTS=1 keeps the button, to see the stock bar or to test the
+# plugin itself.
+NAV=rootfs/usr/share/applications/hildon-navigator/osso-contact-plugin.desktop
 if [ "${KEEP_CONTACTS:-0}" = "1" ]; then
   echo "    kept (KEEP_CONTACTS=1)"
-elif [ -f "$NAV" ] && grep -q "osso-contact-plugin" "$NAV"; then
-  sed -i '/osso-contact-plugin\.desktop/d' "$NAV"
+elif [ -f "$NAV" ]; then
+  rm -f "$NAV"
   echo "    contacts plugin removed"
 fi
 
@@ -241,6 +275,32 @@ if [ -x "$PREFIX/bin/openssl" ]; then
   echo "==> Including $PREFIX"
   rm -rf rootfs/opt/handshake && mkdir -p rootfs/opt
   cp -a "$PREFIX" rootfs/opt/handshake
+fi
+
+echo "==> 11. Applying the overlay"
+# Last, so your files win over every patch above. The tree under the overlay
+# directory is the tree of the device: gui-overlay/etc/hildon-desktop/
+# tasknavigator.conf lands at /etc/hildon-desktop/tasknavigator.conf.
+#
+# overlay.sh and README.md are the directory's own, not the device's, so they
+# are not copied. overlay.sh runs after the copy, with rootfs as its working
+# directory, for the edits a file cannot express -- a line removed from a
+# stock config, a symlink, a permission.
+#
+# The files keep the owner they have here, so run this build as root (the
+# container does) or the device gets files owned by a user it does not know.
+if [ ! -d "$OVERLAY" ]; then
+  echo "    none ($OVERLAY does not exist)"
+else
+  tar -C "$OVERLAY" --exclude=./overlay.sh --exclude=./README.md -cf - . |
+    tar -C rootfs -xf -
+  n=$(find "$OVERLAY" -type f ! -name overlay.sh ! -name README.md | wc -l | tr -d ' ')
+  [ "$n" = "1" ] && unit=file || unit=files
+  echo "    copied $n $unit from $OVERLAY"
+  if [ -f "$OVERLAY/overlay.sh" ]; then
+    ( cd rootfs && WORK="$WORK" PREFIX="$PREFIX" sh "$OVERLAY/overlay.sh" )
+    echo "    ran overlay.sh"
+  fi
 fi
 
 echo "==> Rebuilding the filesystems"
