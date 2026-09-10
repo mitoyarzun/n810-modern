@@ -96,6 +96,35 @@ everything above it is healthy. `tools/fb-autoupdate.c` sets
 Writing to `/dev/fb0` to test this proves nothing: on a manual-update panel a
 plain write never reaches the screen either way.
 
+**The applications menu never opens, and the theme is why.** Clicking the
+applications button in the task navigator does nothing. The button itself is
+live -- it takes the click and changes to its pressed state -- but no menu
+maps. Verified by injecting the click through the QEMU monitor and diffing
+screendumps: **0 pixels change** on the stock image.
+
+Both boot logs carry the cause, or at least its best candidate:
+
+```
+-:3: Invalid color constant 'SelectionColor'
+-:3: error: invalid string constant "SelectionColor", expected valid string constant
+```
+
+Hildon's theme gtkrc fails to parse at line 3, so theme resources never fully
+resolve, and a popup whose style comes from that theme has nothing to draw
+with. Not yet proven, and not yet fixed.
+
+The consequence for anyone adding an application to this image: a correct
+entry in `/etc/xdg/menus/applications.menu` is **unreachable here** and will
+look like your own bug. It is not -- the entry is fine and works on real
+hardware. Launch the program from an init script instead:
+
+```sh
+su - user -c "DISPLAY=:0.0 /path/to/your-app" &
+```
+
+which is how `af-base-apps` starts a UI program. Root cannot reach the
+session's X server.
+
 **DSME is the process supervisor as well as a state machine.** Disabling it
 (necessary — the emulator has no battery, so it powers the machine off)
 cascades into five further failures, including twenty init scripts that launch
