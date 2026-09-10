@@ -3,10 +3,10 @@
 #
 #   tools/mk-sysroot.sh                 # once
 #   tools/build-openssl.sh              # then this
-#   tools/check-artifact.sh out/opt/handshake/lib/lib*.so.3 ...
+#   tools/check-artifact.sh out/opt/n810-modern/lib/lib*.so.3 ...
 #
 # Installs into ./out, laid out as it will sit on the device under
-# /opt/handshake. Nothing here touches the device's own OpenSSL 0.9.8e.
+# /opt/n810-modern. Nothing here touches the device's own OpenSSL 0.9.8e.
 set -euo pipefail
 
 VERSION="${OPENSSL_VERSION:-3.5.8}"
@@ -51,8 +51,8 @@ echo "==> Configuring"
 # IFUNC-based too. Mutex fallbacks cost nothing measurable on one 400 MHz
 # core. See BUILDLOG.md and tools/qemu-smoke.sh, which is how this was found.
 ./Configure linux-armv4 \
-  --prefix=/opt/handshake \
-  --openssldir=/opt/handshake/ssl \
+  --prefix=/opt/n810-modern \
+  --openssldir=/opt/n810-modern/ssl \
   --with-rand-seed=devrandom \
   --libdir=lib \
   -DBROKEN_CLANG_ATOMICS \
@@ -71,7 +71,7 @@ rm -rf "$OUT" && make DESTDIR="$OUT" install_sw install_ssldirs
 # something re-enabled the __atomic_* builtins -- fix that, do not ship a copy.
 # Captured, not piped: `set -o pipefail` with `grep -q` reports SIGPIPE (141)
 # on a match, so a piped test here would never fire. See check-artifact.sh.
-libcrypto_needed=$($TARGET-readelf -d "$OUT/opt/handshake/lib/libcrypto.so.3" 2>/dev/null || true)
+libcrypto_needed=$($TARGET-readelf -d "$OUT/opt/n810-modern/lib/libcrypto.so.3" 2>/dev/null || true)
 if grep -q 'libatomic\.so\.1' <<<"$libcrypto_needed"; then
   echo "FAIL: libcrypto still needs libatomic.so.1."
   echo "      glibc 2.5 cannot resolve its IFUNC symbols. See the Configure"
@@ -109,7 +109,7 @@ find "$OUT" -type f \( -name '*.so*' -o -perm -u+x \) -print0 |
 
 echo "==> Verifying"
 mapfile -t artefacts < <(find "$OUT" -type f \( -name '*.so*' -o -name openssl \) | sort)
-EXTRA_LIBDIR="$OUT/opt/handshake/lib" "$HERE/check-artifact.sh" "${artefacts[@]}"
+EXTRA_LIBDIR="$OUT/opt/n810-modern/lib" "$HERE/check-artifact.sh" "${artefacts[@]}"
 
 echo
 echo "Staged tree ($(du -sh "$OUT" | cut -f1)):"
@@ -117,12 +117,12 @@ find "$OUT" -maxdepth 4 -type d | sed "s|$OUT|  |"
 cat <<EOF
 
 Next:
-  1. Copy $OUT/opt/handshake to the device as /opt/handshake
+  1. Copy $OUT/opt/n810-modern to the device as /opt/n810-modern
      (put it on the 2 GB internal flash, not the 256 MB rootfs).
   2. On the device:
-       export LD_LIBRARY_PATH=/opt/handshake/lib
-       /opt/handshake/bin/openssl version -a
-       /opt/handshake/bin/openssl s_client -connect example.org:443 -tls1_3
+       export LD_LIBRARY_PATH=/opt/n810-modern/lib
+       /opt/n810-modern/bin/openssl version -a
+       /opt/n810-modern/bin/openssl s_client -connect example.org:443 -tls1_3
   3. If step 2 dies with "FATAL: kernel too old", the ABI note check was
      bypassed -- see tools/env.sh.
 EOF

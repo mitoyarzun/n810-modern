@@ -15,7 +15,7 @@ set -euo pipefail
 
 OUT="${1:-$PWD/out}"
 WORK="${2:-$PWD/emulator}"
-PREFIX="$OUT/opt/handshake"
+PREFIX="$OUT/opt/n810-modern"
 
 [ -d "$WORK/rootfs" ]        || { echo "no rootfs -- run tools/mk-diablo-emulator.sh"; exit 1; }
 [ -x "$PREFIX/bin/openssl" ] || { echo "no build at $PREFIX -- run tools/build-openssl.sh"; exit 1; }
@@ -29,14 +29,14 @@ KERNEL=$(ls unpacked/kernel_* | head -1)
 INITFS=$(ls unpacked/initfs_* | head -1)
 
 echo "==> Injecting $PREFIX into the Diablo rootfs"
-rm -rf rootfs/opt/handshake && mkdir -p rootfs/opt
-cp -a "$PREFIX" rootfs/opt/handshake
+rm -rf rootfs/opt/n810-modern && mkdir -p rootfs/opt
+cp -a "$PREFIX" rootfs/opt/n810-modern
 
 cat > rootfs/root/hs-test.sh <<'TEST'
 #!/bin/sh
 exec >/dev/console 2>&1
 mount -t proc proc /proc 2>/dev/null
-H=/opt/handshake
+H=/opt/n810-modern
 export LD_LIBRARY_PATH=$H/lib
 export OPENSSL_MODULES=$H/lib/ossl-modules
 

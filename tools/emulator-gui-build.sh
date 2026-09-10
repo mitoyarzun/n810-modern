@@ -15,7 +15,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK="${1:-$PWD/emulator}"
 OUT="${2:-$PWD/out}"
-PREFIX="$OUT/opt/handshake"
+PREFIX="$OUT/opt/n810-modern"
 
 [ -d "$WORK/rootfs" ] || { echo "no rootfs -- run tools/mk-diablo-emulator.sh"; exit 1; }
 command -v mkfs.jffs2 >/dev/null || { echo "mkfs.jffs2 not found -- apt install mtd-utils"; exit 1; }
@@ -239,8 +239,8 @@ fi
 
 if [ -x "$PREFIX/bin/openssl" ]; then
   echo "==> Including $PREFIX"
-  rm -rf rootfs/opt/handshake && mkdir -p rootfs/opt
-  cp -a "$PREFIX" rootfs/opt/handshake
+  rm -rf rootfs/opt/n810-modern && mkdir -p rootfs/opt
+  cp -a "$PREFIX" rootfs/opt/n810-modern
 fi
 
 echo "==> Rebuilding the filesystems"

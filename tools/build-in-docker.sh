@@ -73,8 +73,8 @@ fi
 
 echo
 echo '==> Packaging'
-tar czf /dist/handshake-diablo-armel.tar.gz -C out opt
-sha256sum /dist/handshake-diablo-armel.tar.gz
+tar czf /dist/n810-modern-diablo-armel.tar.gz -C out opt
+sha256sum /dist/n810-modern-diablo-armel.tar.gz
 "
 
 echo

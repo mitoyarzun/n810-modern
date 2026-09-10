@@ -7,7 +7,7 @@
 #
 # The device ships libcurl3 7.15.5 linked against OpenSSL 0.9.8e, so it has the
 # same problem as everything else: it cannot complete a modern handshake. This
-# installs a current curl beside it under /opt/handshake, and does not touch
+# installs a current curl beside it under /opt/n810-modern, and does not touch
 # the system library.
 #
 # curl also unlocks the rest of the ladder: git wants it, and NetSurf wants it.
@@ -20,7 +20,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK="${WORK:-$PWD/build}"
 OUT="${OUT:-$PWD/out}"
 JOBS="${JOBS:-$(nproc)}"
-SSLDIR="$OUT/opt/handshake"
+SSLDIR="$OUT/opt/n810-modern"
 
 # shellcheck source=env.sh
 . "$HERE/env.sh" "${DIABLO_SYSROOT:-$PWD/sysroot-diablo}"
@@ -58,9 +58,9 @@ echo "==> Configuring"
 # which carries known CVEs. tools/build-zlib.sh puts 1.3.2 in the same prefix.
 ./configure \
   --host=arm-linux-gnueabi \
-  --prefix=/opt/handshake \
+  --prefix=/opt/n810-modern \
   --with-openssl="$SSLDIR" \
-  --with-ca-bundle=/opt/handshake/ssl/cert.pem \
+  --with-ca-bundle=/opt/n810-modern/ssl/cert.pem \
   --with-zlib="$SSLDIR" \
   --disable-ldap --disable-ldaps \
   --without-libpsl --without-libidn2 \
@@ -76,16 +76,16 @@ echo "==> Staging into $OUT"
 make DESTDIR="$OUT" install
 
 echo "==> Stripping"
-find "$OUT/opt/handshake" -type f \( -name 'curl' -o -name 'libcurl.so*' \) -print0 |
+find "$OUT/opt/n810-modern" -type f \( -name 'curl' -o -name 'libcurl.so*' \) -print0 |
   while IFS= read -r -d '' f; do
     file "$f" | grep -q 'ELF 32-bit.*ARM' && "$STRIP" --strip-unneeded "$f" || true
   done
 
 echo "==> Verifying"
-mapfile -t artefacts < <(find "$OUT/opt/handshake" -type f \
+mapfile -t artefacts < <(find "$OUT/opt/n810-modern" -type f \
   \( -name 'curl' -o -name 'libcurl.so.*' \) | sort)
 [ ${#artefacts[@]} -gt 0 ] || { echo "no ARM binaries were built"; exit 1; }
-EXTRA_LIBDIR="$OUT/opt/handshake/lib" "$HERE/check-artifact.sh" "${artefacts[@]}"
+EXTRA_LIBDIR="$OUT/opt/n810-modern/lib" "$HERE/check-artifact.sh" "${artefacts[@]}"
 
 cat <<INFO
 

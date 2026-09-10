@@ -190,7 +190,7 @@ the device's own glibc 2.5 `ld-linux.so.3`, not the host's.
 The first run, on the artefacts section 6 declared device-safe:
 
 ```
-relocation error: /opt/handshake/lib/libcrypto.so.3: symbol __atomic_fetch_add_8,
+relocation error: /opt/n810-modern/lib/libcrypto.so.3: symbol __atomic_fetch_add_8,
 version LIBATOMIC_1.0 not defined in file libatomic.so.1 with link time reference
 ```
 
@@ -363,7 +363,7 @@ different tarball and four `configure` flags:
 --disable-systemd    Diablo predates systemd by five years
 --disable-libwrap    tcp_wrappers is not in the Diablo index
 --disable-fips       needs a validated provider we do not ship
---with-ssl=$OUT/opt/handshake
+--with-ssl=$OUT/opt/n810-modern
 ```
 
 Plus two `ac_cv_*` cache variables, because autoconf answers those questions by
@@ -525,7 +525,7 @@ BusyBox v1.6.1 (2008-09-18 09:43:17 EEST) Built-in shell (ash)
 
 ### The answer
 
-`mkfs.jffs2` rebuilds the rootfs with `/opt/handshake` inside it, and the test
+`mkfs.jffs2` rebuilds the rootfs with `/opt/n810-modern` inside it, and the test
 script runs as `init`:
 
 ```
@@ -705,7 +705,7 @@ arm64 user into emulation for no reason. It now runs native by default.
 ## Result
 
 ```
-== out/opt/handshake/bin/openssl
+== out/opt/n810-modern/bin/openssl
    ok    ABI note 2.6.8
    ok    glibc symbols <= GLIBC_2.4
    ok    no 64-bit time_t symbols

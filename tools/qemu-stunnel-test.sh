@@ -15,7 +15,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT="${1:-$PWD/out}"
 SYSROOT="${2:-${DIABLO_SYSROOT:-$PWD/sysroot-diablo}}"
-PREFIX="$OUT/opt/handshake"
+PREFIX="$OUT/opt/n810-modern"
 HOSTNAME_="${SMOKE_HOST:-example.org}"
 PORT="${SMOKE_PORT:-18443}"
 rc=0

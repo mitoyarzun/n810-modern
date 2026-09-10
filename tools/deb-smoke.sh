@@ -26,7 +26,7 @@ INITFS=$(ls unpacked/initfs_* | head -1)
 echo "==> Staging packages into the rootfs"
 # The device must not already have the files: install from a clean tree, or
 # the test proves only that cp works.
-rm -rf rootfs/opt/handshake rootfs/root/debs
+rm -rf rootfs/opt/n810-modern rootfs/root/debs
 mkdir -p rootfs/root/debs
 cp "$DIST"/n810-modern-*.deb rootfs/root/debs/
 ls rootfs/root/debs | sed 's/^/    /'
@@ -55,20 +55,20 @@ dpkg -l | grep n810-modern | sed 's/^/    /'
 
 echo
 echo "--- the files landed where the rpath expects ---"
-ls -la /opt/handshake/lib/libssl.so.3 /opt/handshake/bin/curl 2>&1 | sed 's/^/    /'
+ls -la /opt/n810-modern/lib/libssl.so.3 /opt/n810-modern/bin/curl 2>&1 | sed 's/^/    /'
 
 echo
 echo "--- and they run ---"
-export LD_LIBRARY_PATH=/opt/handshake/lib
-/opt/handshake/bin/openssl version 2>&1 | sed 's/^/    /'
-/opt/handshake/bin/curl --version 2>&1 | head -2 | sed 's/^/    /'
-/opt/handshake/bin/ssh -V 2>&1 | sed 's/^/    /'
-/opt/handshake/bin/stunnel -version 2>&1 | sed -n '2,3p' | sed 's/^/    /'
+export LD_LIBRARY_PATH=/opt/n810-modern/lib
+/opt/n810-modern/bin/openssl version 2>&1 | sed 's/^/    /'
+/opt/n810-modern/bin/curl --version 2>&1 | head -2 | sed 's/^/    /'
+/opt/n810-modern/bin/ssh -V 2>&1 | sed 's/^/    /'
+/opt/n810-modern/bin/stunnel -version 2>&1 | sed -n '2,3p' | sed 's/^/    /'
 
 echo
 echo "--- removal is clean ---"
 dpkg -r n810-modern-ssh 2>&1 | sed 's/^/    /'
-ls /opt/handshake/bin/ssh 2>&1 | sed 's/^/    /'
+ls /opt/n810-modern/bin/ssh 2>&1 | sed 's/^/    /'
 
 echo "================ DONE ================"
 sync; poweroff -f 2>/dev/null || halt -f 2>/dev/null || exec /bin/sh

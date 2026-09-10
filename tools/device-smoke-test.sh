@@ -1,12 +1,12 @@
 #!/bin/sh
 # Run this ON THE N810 (or N800), not on the build host.
 #
-#   scp -r out/opt/handshake tools/device-smoke-test.sh root@tablet:/opt/
+#   scp -r out/opt/n810-modern tools/device-smoke-test.sh root@tablet:/opt/
 #   ssh root@tablet 'sh /opt/device-smoke-test.sh'
 #
 # Deliberately /bin/sh and POSIX-only: Diablo has BusyBox ash, not bash.
 # Deliberately read-only: it changes nothing on the device.
-PREFIX=${PREFIX:-/opt/handshake}
+PREFIX=${PREFIX:-/opt/n810-modern}
 SSL=$PREFIX/bin/openssl
 export LD_LIBRARY_PATH=$PREFIX/lib
 

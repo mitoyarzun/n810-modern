@@ -14,7 +14,7 @@
 #      compression library with published vulnerabilities defeats the point of
 #      the exercise.
 #
-# So we ship our own, under /opt/handshake, alongside the system one. Same rule
+# So we ship our own, under /opt/n810-modern, alongside the system one. Same rule
 # as everything else here: coexist, never replace.
 set -euo pipefail
 
@@ -45,7 +45,7 @@ rm -rf "zlib-$VERSION" && tar xzf "$tarball" && cd "zlib-$VERSION"
 echo "==> Configuring"
 # zlib's configure is hand-written, not autoconf: no --host, it takes the
 # compiler from the environment, which tools/env.sh has already set.
-CHOST="$TARGET" ./configure --prefix=/opt/handshake
+CHOST="$TARGET" ./configure --prefix=/opt/n810-modern
 
 echo "==> Building (-j$JOBS)"
 make -j"$JOBS"
@@ -54,15 +54,15 @@ echo "==> Staging into $OUT"
 make DESTDIR="$OUT" install
 
 echo "==> Stripping"
-find "$OUT/opt/handshake" -type f -name 'libz.so*' -print0 |
+find "$OUT/opt/n810-modern" -type f -name 'libz.so*' -print0 |
   while IFS= read -r -d '' f; do
     file "$f" | grep -q 'ELF 32-bit.*ARM' && "$STRIP" --strip-unneeded "$f" || true
   done
 
 echo "==> Verifying"
-mapfile -t artefacts < <(find "$OUT/opt/handshake" -type f -name 'libz.so.*' | sort)
+mapfile -t artefacts < <(find "$OUT/opt/n810-modern" -type f -name 'libz.so.*' | sort)
 [ ${#artefacts[@]} -gt 0 ] || { echo "no ARM libraries were built"; exit 1; }
-EXTRA_LIBDIR="$OUT/opt/handshake/lib" "$HERE/check-artifact.sh" "${artefacts[@]}"
+EXTRA_LIBDIR="$OUT/opt/n810-modern/lib" "$HERE/check-artifact.sh" "${artefacts[@]}"
 
 echo
 echo "Built: ${artefacts[*]}"

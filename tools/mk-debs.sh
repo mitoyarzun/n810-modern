@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Package the build as .deb files a stock Diablo device can install.
 #
-#   tools/build-in-docker.sh                  # produces out/opt/handshake
+#   tools/build-in-docker.sh                  # produces out/opt/n810-modern
 #   tools/mk-kernel-2621-backport.sh          # produces the kernel (optional)
 #   tools/mk-debs.sh
 #
@@ -17,7 +17,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT="${OUT:-$PWD/out}"
 DIST="${DIST:-$PWD/dist}"
-STAGE="$OUT/opt/handshake"
+STAGE="$OUT/opt/n810-modern"
 KERNEL="${KERNEL:-}"
 VERSION="${VERSION:-1.0}"
 MAINTAINER="${MAINTAINER:-Jaime Oyarzun Knittel <mito.oyarzun@gmail.com>}"
@@ -30,9 +30,9 @@ BUILD="$DIST/.deb-build"
 rm -rf "$BUILD"; mkdir -p "$BUILD"
 
 # The install prefix is NOT arbitrary. Every binary here has
-# -Wl,-rpath,/opt/handshake/lib baked in, so the libraries must land exactly
+# -Wl,-rpath,/opt/n810-modern/lib baked in, so the libraries must land exactly
 # there or nothing runs. See CAVEATS.md.
-PREFIX=opt/handshake
+PREFIX=opt/n810-modern
 
 # ---------------------------------------------------------------- helpers ---
 
@@ -92,21 +92,28 @@ for so in libcrypto libssl libz libcurl; do
     mkdir -p "$R/$PREFIX/lib"; cp -a "$f" "$R/$PREFIX/lib/"
   done
 done
+mkdir -p "$R/usr/sbin"
+cp -a "$HERE/deb/n810-modern-update" "$R/usr/sbin/"
+chmod 755 "$R/usr/sbin/n810-modern-update"
 control "$R" n810-modern-tls "" \
   "modern TLS for Maemo Diablo (OpenSSL 3.5, curl, stunnel)" \
 "Diablo ships OpenSSL 0.9.8e, which tops out at TLS 1.0 with no ECDHE, no
 AES-GCM and no SNI. Modern servers require TLS 1.2/1.3 with ECDHE and an AEAD
 cipher, so there is no overlap and the connection dies at ClientHello.
 .
-This installs OpenSSL 3.5, zlib, curl and stunnel under /opt/handshake,
+This installs OpenSSL 3.5, zlib, curl and stunnel under /opt/n810-modern,
 alongside the stock libraries rather than over them. Nothing already on the
 device changes.
 .
-  export LD_LIBRARY_PATH=/opt/handshake/lib
-  /opt/handshake/bin/curl https://example.org/
+  export LD_LIBRARY_PATH=/opt/n810-modern/lib
+  /opt/n810-modern/bin/curl https://example.org/
 .
 stunnel lets applications that cannot be rebuilt reach modern TLS: they speak
-plain HTTP to localhost and stunnel does the handshake."
+plain HTTP to localhost and stunnel does the handshake.
+.
+Also installs n810-modern-update, which fetches the other packages over HTTPS
+once this one is in place. apt cannot do that itself: its transport methods
+link against the system OpenSSL 0.9.8, not the copy under /opt/n810-modern."
 build_deb "$R" n810-modern-tls
 
 # -------------------------------------------------------------------- ssh ---
@@ -122,8 +129,8 @@ storage, so this is the package that changes how you work with the tablet.
 .
 Host keys are not shipped. Generate them once on the device:
 .
-  /opt/handshake/bin/ssh-keygen -A -f /opt/handshake
-  /opt/handshake/sbin/sshd -f /opt/handshake/etc/ssh/sshd_config
+  /opt/n810-modern/bin/ssh-keygen -A -f /opt/n810-modern
+  /opt/n810-modern/sbin/sshd -f /opt/n810-modern/etc/ssh/sshd_config
 .
 Built with --with-sandbox=no: modern OpenSSH sandboxes its privilege-separated
 child with seccomp-bpf, which arrived in Linux 3.5. This kernel is 2.6.21."
@@ -178,8 +185,8 @@ fi
 EXCLUDE='^share/man/|^share/doc/|\.la$'
 echo "==> Checking that nothing was dropped by accident"
 ( cd "$STAGE" && find . -type f -o -type l ) | sed 's|^\./||' | sort > "$BUILD/.all"
-( cd "$BUILD" && find . -path './*/opt/handshake/*' \( -type f -o -type l \) ) \
-  | sed 's|^\./[^/]*/opt/handshake/||' | sort -u > "$BUILD/.packaged"
+( cd "$BUILD" && find . -path './*/opt/n810-modern/*' \( -type f -o -type l \) ) \
+  | sed 's|^\./[^/]*/opt/n810-modern/||' | sort -u > "$BUILD/.packaged"
 comm -23 "$BUILD/.all" "$BUILD/.packaged" > "$BUILD/.unpackaged" || true
 grep -vE "$EXCLUDE" "$BUILD/.unpackaged" > "$BUILD/.unexplained" || true
 skipped=$(grep -cE "$EXCLUDE" "$BUILD/.unpackaged" || true)
@@ -194,6 +201,8 @@ else
 fi
 
 echo
-echo "Install on the device with:"
+echo "On the device, ONE package is installed by hand:"
 echo "  dpkg -i n810-modern-tls_${VERSION}_armel.deb"
-echo "  dpkg -i n810-modern-ssh_${VERSION}_armel.deb"
+echo
+echo "It ships n810-modern-update, which fetches the rest over HTTPS:"
+echo "  n810-modern-update install n810-modern-ssh"
